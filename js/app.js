@@ -1,0 +1,1113 @@
+/* MultiGrader — user interface. */
+(function () {
+  "use strict";
+  const L = MGLayout, S = MGScanner, St = MGStore;
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const main = $("#main");
+  const uiState = {}; // per-test view state that shouldn't be saved
+  const ui = (t) => uiState[t.id] || (uiState[t.id] = {});
+
+  /* ---------------- small helpers ---------------- */
+
+  function fmtDate(d) {
+    if (!d) return "";
+    const [y, m, dd] = d.split("-").map(Number);
+    if (!y || !m || !dd) return d;
+    return new Date(y, m - 1, dd).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  }
+  const fmtTime = (iso) => new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const pct = (x) => (isFinite(x) ? Math.round(x) + "%" : "–");
+  const fmtPts = (x) => (Math.round(x * 100) / 100).toString();
+
+  function classNames(t) {
+    return t.classIds.map(St.getClass).filter(Boolean).map((c) => c.name).join(", ");
+  }
+  function testRoster(t) {
+    const out = [];
+    for (const cid of t.classIds) {
+      const c = St.getClass(cid);
+      if (c) for (const s of St.sortedStudents(c)) out.push({ student: s, cls: c });
+    }
+    return out;
+  }
+  function presetName(s) {
+    if (s.type === "custom") return "Custom (" + L.sectionChoices(s).join("") + ")";
+    const p = L.PRESETS.find((x) => x.id === s.type);
+    return p ? p.name : s.type;
+  }
+  function sectionRanges(t) {
+    let start = 0;
+    return t.sections.map((s) => {
+      const n = Math.max(0, parseInt(s.count, 10) || 0);
+      const r = { start, end: start + n - 1, n };
+      start += n;
+      return r;
+    });
+  }
+
+  let toastTimer;
+  function toast(msg, kind) {
+    const el = $("#toast");
+    el.className = "toast " + (kind || "");
+    el.innerHTML = msg;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.add("hidden"), 3500);
+  }
+
+  let saveTimer;
+  function saveSoon(t) {
+    if (t) t.updatedAt = St.now();
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => St.save(), 300);
+  }
+  window.addEventListener("beforeunload", () => { clearTimeout(saveTimer); St.save(); });
+
+  function download(name, text, type) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: type || "text/plain" }));
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+
+  function grayToBlob(img) {
+    const c = document.createElement("canvas");
+    c.width = img.w; c.height = img.h;
+    const ctx = c.getContext("2d");
+    const id = ctx.createImageData(img.w, img.h);
+    for (let i = 0, j = 0; i < img.g.length; i++, j += 4) { id.data[j] = id.data[j + 1] = id.data[j + 2] = img.g[i]; id.data[j + 3] = 255; }
+    ctx.putImageData(id, 0, 0);
+    return new Promise((res) => c.toBlob(res, "image/jpeg", 0.8));
+  }
+
+  /* ---------------- routing ---------------- */
+
+  function route() {
+    stopCamera();
+    closeModal();
+    const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
+    const view = parts[0] || "tests";
+    $$(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.nav === (view === "test" ? "tests" : view)));
+    window.scrollTo(0, 0);
+    if (view === "test") {
+      const t = St.getTest(parts[1]);
+      if (!t) { location.hash = "#/tests"; return; }
+      const sub = parts[2] || "build";
+      if (sub === "print") viewPrint(t);
+      else if (sub === "results") viewResults(t);
+      else viewBuild(t);
+    } else if (view === "classes") viewClasses(parts[1]);
+    else if (view === "scan") viewScan();
+    else if (view === "data") viewData();
+    else viewTests();
+  }
+  window.addEventListener("hashchange", route);
+
+  /* ================================================================
+   * TESTS LIST
+   * ================================================================ */
+
+  function viewTests() {
+    const tests = St.db.tests;
+    const noClasses = St.db.classes.length === 0;
+    main.innerHTML = `
+      <div class="page-head">
+        <h1>Tests</h1>
+        <button class="btn primary" id="new-test">+ New test</button>
+      </div>
+      ${tests.length === 0 ? `
+        <div class="card hero">
+          <h2>Grade multiple-choice tests with your camera</h2>
+          <ol class="steps">
+            <li><strong>Add a class</strong> and paste in its roster. ${noClasses ? `<a href="#/classes">Add a class →</a>` : "✓"}</li>
+            <li><strong>Build a test:</strong> the question format (T/F, A/S/N, A–E…) and answer key. The answer sheet is generated from it automatically.</li>
+            <li><strong>Print named sheets</strong>, one for each student, then <strong>scan</strong> them with a phone or webcam.</li>
+          </ol>
+        </div>` : `
+        ${noClasses ? `<div class="notice">Tip: <a href="#/classes">add a class</a> so you can print sheets with student names.</div>` : ""}
+        <div class="test-list">${tests.map(testCard).join("")}</div>`}
+    `;
+    $("#new-test").onclick = () => { const t = St.addTest(); location.hash = `#/test/${t.id}/build`; };
+    $$("[data-dup]").forEach((b) => (b.onclick = () => { const t = St.duplicateTest(St.getTest(b.dataset.dup)); toast("Duplicated — edit the copy's format or key."); location.hash = `#/test/${t.id}/build`; }));
+    $$("[data-del]").forEach((b) => (b.onclick = () => {
+      const t = St.getTest(b.dataset.del);
+      const n = St.scansFor(t).length;
+      if (confirm(`Delete "${t.title}"${n ? ` and its ${n} scanned sheet${n > 1 ? "s" : ""}` : ""}? This can't be undone.`)) { St.deleteTest(t); viewTests(); }
+    }));
+  }
+
+  function testCard(t) {
+    const nq = L.questionChoices(t).length;
+    const scans = St.scansFor(t);
+    const roster = testRoster(t).length;
+    const keyed = St.flatKey(t).filter(Boolean).length;
+    let avg = "";
+    if (scans.length) {
+      const g = scans.map((s) => St.grade(t, s).pct);
+      avg = ` · avg ${pct(g.reduce((a, b) => a + b, 0) / g.length)}`;
+    }
+    return `
+      <div class="card test-card">
+        <div class="tc-main">
+          <a class="tc-title" href="#/test/${t.id}/build">${esc(t.title)}</a>
+          <div class="muted small">${esc(fmtDate(t.date))}${classNames(t) ? " · " + esc(classNames(t)) : ""}</div>
+          <div class="tc-meta">
+            <span class="pill">${nq} question${nq === 1 ? "" : "s"}</span>
+            ${keyed < nq ? `<span class="pill warn">key ${keyed}/${nq}</span>` : `<span class="pill good">key ✓</span>`}
+            ${St.isPrinted(t) ? `<span class="pill">printed</span>` : ""}
+            <span class="pill">${scans.length}${roster ? "/" + roster : ""} scanned${avg}</span>
+          </div>
+        </div>
+        <div class="tc-actions">
+          <a class="btn" href="#/test/${t.id}/build">Edit</a>
+          <a class="btn" href="#/test/${t.id}/print">Print</a>
+          <a class="btn" href="#/test/${t.id}/results">Results</a>
+          <button class="btn ghost small" data-dup="${t.id}" title="Make a copy (e.g. for another version)">Duplicate</button>
+          <button class="btn ghost small danger" data-del="${t.id}">Delete</button>
+        </div>
+      </div>`;
+  }
+
+  function testHeader(t, sub) {
+    return `
+      <div class="test-head">
+        <a class="back" href="#/tests">← Tests</a>
+        <h1 id="th-title">${esc(t.title)}</h1>
+        <nav class="subnav">
+          <a href="#/test/${t.id}/build" class="${sub === "build" ? "active" : ""}">1 · Build</a>
+          <a href="#/test/${t.id}/print" class="${sub === "print" ? "active" : ""}">2 · Print</a>
+          <a href="#/scan" class="">3 · Scan</a>
+          <a href="#/test/${t.id}/results" class="${sub === "results" ? "active" : ""}">4 · Results</a>
+        </nav>
+      </div>`;
+  }
+
+  /* ================================================================
+   * BUILD (details, format, answer key, live sheet preview)
+   * ================================================================ */
+
+  function viewBuild(t) {
+    const classes = St.db.classes;
+    main.innerHTML = `
+      ${testHeader(t, "build")}
+      <div class="build-grid">
+        <div class="build-main">
+          <section class="card">
+            <h2>Details</h2>
+            <div class="form-row">
+              <label class="grow">Title <input id="t-title" value="${esc(t.title)}" /></label>
+              <label>Date <input id="t-date" type="date" value="${esc(t.date)}" /></label>
+            </div>
+            <div class="field">
+              <div class="label">Classes taking this test</div>
+              ${classes.length ? `<div class="check-row">${classes.map((c) => `
+                <label class="check"><input type="checkbox" data-class="${c.id}" ${t.classIds.includes(c.id) ? "checked" : ""}/> ${esc(c.name)} <span class="muted">(${c.students.length})</span></label>`).join("")}</div>`
+                : `<p class="muted">No classes yet. <a href="#/classes">Add a class</a> to print named sheets.</p>`}
+            </div>
+          </section>
+
+          <section class="card">
+            <h2>Question format</h2>
+            <div id="format"></div>
+          </section>
+
+          <section class="card">
+            <div class="card-head"><h2>Answer key</h2><span id="key-status" class="muted small"></span></div>
+            <p class="muted small">Type answers into a section's box (e.g. <code>TFFTF</code> or <code>CADBE</code>), or click bubbles.
+              Shift-click (or type <code>(AC)</code>) to accept more than one answer. You can change the key after scanning; scores update automatically.</p>
+            <div id="key-grid"></div>
+          </section>
+        </div>
+        <aside class="build-preview">
+          <div class="card sticky">
+            <div class="card-head"><h2>Answer sheet</h2><a class="btn small primary" href="#/test/${t.id}/print">Print →</a></div>
+            <div id="preview" class="sheet-preview"></div>
+            <p id="preview-note" class="muted small"></p>
+          </div>
+        </aside>
+      </div>`;
+
+    $("#t-title").oninput = (e) => { t.title = e.target.value; $("#th-title").textContent = t.title || "Untitled test"; saveSoon(t); updatePreview(t); };
+    $("#t-date").onchange = (e) => { t.date = e.target.value; saveSoon(t); updatePreview(t); };
+    $$("[data-class]").forEach((cb) => (cb.onchange = () => {
+      const id = cb.dataset.class;
+      t.classIds = cb.checked ? [...new Set([...t.classIds, id])] : t.classIds.filter((x) => x !== id);
+      saveSoon(t); updatePreview(t);
+    }));
+    renderFormat(t);
+    renderKey(t);
+    updatePreview(t);
+  }
+
+  function formatLocked(t) { return St.isPrinted(t); }
+
+  function renderFormat(t) {
+    const locked = formatLocked(t);
+    const ranges = sectionRanges(t);
+    const opts = (s) => L.PRESETS.map((p) => `<option value="${p.id}" ${s.type === p.id ? "selected" : ""}>${p.name}</option>`).join("") +
+      `<option value="custom" ${s.type === "custom" ? "selected" : ""}>Custom letters…</option>`;
+    $("#format").innerHTML = `
+      ${locked ? `<div class="notice">Sheets have been printed for this test, so the bubble format is locked (points can still change).
+        <button class="btn small" id="unlock">Change format anyway</button></div>` : ""}
+      <div class="sections">
+        ${t.sections.map((s, i) => `
+          <div class="sec-row" data-i="${i}">
+            <span class="sec-range">${ranges[i].n ? `Q${ranges[i].start + 1}${ranges[i].n > 1 ? "–" + (ranges[i].end + 1) : ""}` : "—"}</span>
+            <label>Questions <input class="sec-count" type="number" min="1" max="${L.MAX_ROWS * 4}" value="${esc(s.count)}" ${locked ? "disabled" : ""}/></label>
+            <label>Type <select class="sec-type" ${locked ? "disabled" : ""}>${opts(s)}</select></label>
+            <label class="sec-custom-wrap ${s.type === "custom" ? "" : "hidden"}">Letters <input class="sec-custom" maxlength="6" placeholder="e.g. ABCD" value="${esc(s.custom || "")}" ${locked ? "disabled" : ""}/></label>
+            <label>Points each <input class="sec-points" type="number" min="0" step="0.5" value="${esc(s.points == null ? 1 : s.points)}"/></label>
+            ${locked ? "" : `<span class="sec-btns">
+              <button class="icon-btn" data-up title="Move up" ${i === 0 ? "disabled" : ""}>↑</button>
+              <button class="icon-btn" data-down title="Move down" ${i === t.sections.length - 1 ? "disabled" : ""}>↓</button>
+              <button class="icon-btn danger" data-rm title="Remove section" ${t.sections.length === 1 ? "disabled" : ""}>✕</button></span>`}
+          </div>`).join("")}
+      </div>
+      ${locked ? "" : `<div class="add-row">
+        <span class="muted small">Add section:</span>
+        ${[["TF", "T/F"], ["ASN", "A/S/N"], ["AD", "A–D"], ["AE", "A–E"], ["custom", "Custom"]].map(([id, n]) => `<button class="btn small" data-add="${id}">+ ${n}</button>`).join("")}
+      </div>`}
+      <p id="format-summary" class="muted small"></p>`;
+
+    const fmtChanged = () => { saveSoon(t); updateRanges(t); renderKey(t); updatePreview(t); };
+    $$(".sec-row").forEach((row) => {
+      const s = t.sections[+row.dataset.i];
+      $(".sec-count", row).onchange = (e) => { s.count = Math.max(1, Math.min(L.MAX_ROWS * 4, parseInt(e.target.value, 10) || 1)); e.target.value = s.count; fmtChanged(); };
+      $(".sec-type", row).onchange = (e) => { s.type = e.target.value; $(".sec-custom-wrap", row).classList.toggle("hidden", s.type !== "custom"); if (s.type === "custom" && !s.custom) s.custom = "ABCD"; $(".sec-custom", row).value = s.custom || ""; fmtChanged(); };
+      $(".sec-custom", row).oninput = (e) => { s.custom = e.target.value.toUpperCase(); fmtChanged(); };
+      $(".sec-points", row).oninput = (e) => { s.points = e.target.value === "" ? 1 : parseFloat(e.target.value); saveSoon(t); updateRanges(t); renderKeyStatus(t); };
+      const mv = (d) => { const i = +row.dataset.i; const [x] = t.sections.splice(i, 1); t.sections.splice(i + d, 0, x); fmtChanged(); renderFormat(t); };
+      const up = $("[data-up]", row), dn = $("[data-down]", row), rm = $("[data-rm]", row);
+      if (up) up.onclick = () => mv(-1);
+      if (dn) dn.onclick = () => mv(1);
+      if (rm) rm.onclick = () => { t.sections.splice(+row.dataset.i, 1); fmtChanged(); renderFormat(t); };
+    });
+    $$("[data-add]").forEach((b) => (b.onclick = () => {
+      t.sections.push({ id: St.uid(), count: 5, type: b.dataset.add, custom: b.dataset.add === "custom" ? "ABCD" : undefined, points: 1, key: [] });
+      fmtChanged(); renderFormat(t);
+    }));
+    const un = $("#unlock");
+    if (un) un.onclick = () => {
+      const n = St.scansFor(t).length;
+      if (!confirm(`Sheets you've already printed for this test will no longer scan once the format changes — you'll need to reprint them.${n ? `\n\nThe ${n} sheet(s) already scanned are kept, but their answers may no longer line up with the new questions.` : ""}\n\nContinue?`)) return;
+      St.resetFormat(t);
+      renderFormat(t); updatePreview(t);
+    };
+    updateRanges(t);
+  }
+
+  function updateRanges(t) {
+    const ranges = sectionRanges(t);
+    $$(".sec-row").forEach((row, i) => {
+      const r = ranges[i];
+      if (r) $(".sec-range", row).textContent = r.n ? `Q${r.start + 1}${r.n > 1 ? "–" + (r.end + 1) : ""}` : "—";
+    });
+    const nq = L.questionChoices(t).length;
+    const pts = St.questionPoints(t).reduce((a, b) => a + b, 0);
+    const lay = L.computeLayout(t);
+    const el = $("#format-summary");
+    if (el) el.innerHTML = lay.error ? `<span class="bad-txt">${esc(lay.error)}</span>` : `${nq} questions · ${fmtPts(pts)} points · ${lay.columns.length} column${lay.columns.length === 1 ? "" : "s"} on the sheet`;
+  }
+
+  /* --- answer key --- */
+
+  function keyToQuick(key, n) {
+    let out = "";
+    for (let i = 0; i < n; i++) {
+      const k = key[i] || "";
+      out += k.length > 1 ? `(${k})` : k || "-";
+      if (i % 5 === 4 && i < n - 1) out += " ";
+    }
+    return out.replace(/[\s-]+$/, "");
+  }
+
+  function quickToKey(text, choices, n) {
+    const out = [];
+    const src = text.toUpperCase();
+    let i = 0;
+    while (i < src.length && out.length < n) {
+      const c = src[i];
+      if (c === "(") {
+        const j = src.indexOf(")", i);
+        const grp = src.slice(i + 1, j < 0 ? src.length : j).split("").filter((x) => choices.includes(x));
+        out.push([...new Set(grp)].sort().join(""));
+        i = j < 0 ? src.length : j + 1;
+      } else if (c === "-" || c === "?" || c === "_" || c === ".") { out.push(""); i++; }
+      else if (choices.includes(c)) { out.push(c); i++; }
+      else i++;
+    }
+    return out;
+  }
+
+  function renderKey(t) {
+    const ranges = sectionRanges(t);
+    $("#key-grid").innerHTML = t.sections.map((s, si) => {
+      const ch = L.sectionChoices(s);
+      const r = ranges[si];
+      s.key = s.key || [];
+      if (!r.n) return "";
+      return `
+        <div class="key-sec" data-si="${si}">
+          <div class="key-sec-head">
+            <strong>Q${r.start + 1}${r.n > 1 ? "–" + (r.end + 1) : ""}</strong>
+            <span class="muted small">${esc(presetName(s))}</span>
+            <input class="key-quick" spellcheck="false" autocomplete="off" placeholder="Type ${r.n} answers, e.g. ${ch.slice(0, 3).join("")}…" value="${esc(keyToQuick(s.key, r.n))}" />
+          </div>
+          <div class="key-rows">
+            ${Array.from({ length: r.n }, (_, i) => keyRow(r.start + i + 1, i, ch, s.key[i] || "")).join("")}
+          </div>
+        </div>`;
+    }).join("");
+    $$(".key-sec").forEach((sec) => {
+      const s = t.sections[+sec.dataset.si];
+      const ch = L.sectionChoices(s);
+      const n = Math.max(0, parseInt(s.count, 10) || 0);
+      $(".key-quick", sec).oninput = (e) => {
+        const k = quickToKey(e.target.value, ch, n);
+        s.key = Array.from({ length: n }, (_, i) => k[i] || "");
+        $$(".key-row", sec).forEach((row, i) => paintKeyRow(row, s.key[i]));
+        saveSoon(t); renderKeyStatus(t);
+      };
+      sec.onclick = (e) => {
+        const b = e.target.closest(".kb");
+        if (!b) return;
+        const row = b.closest(".key-row");
+        const i = +row.dataset.local;
+        const c = b.dataset.c;
+        let k = s.key[i] || "";
+        if (e.shiftKey || e.metaKey || e.ctrlKey) k = k.includes(c) ? k.replace(c, "") : [...k, c].sort().join("");
+        else k = k === c ? "" : c;
+        s.key[i] = k;
+        paintKeyRow(row, k);
+        $(".key-quick", sec).value = keyToQuick(s.key, n);
+        saveSoon(t); renderKeyStatus(t);
+      };
+    });
+    renderKeyStatus(t);
+  }
+
+  function keyRow(num, local, ch, k) {
+    return `<div class="key-row ${k ? "" : "unset"}" data-local="${local}"><span class="qn">${num}</span>${ch.map((c) => `<button type="button" class="kb ${k.includes(c) ? "on" : ""}" data-c="${esc(c)}">${esc(c)}</button>`).join("")}</div>`;
+  }
+  function paintKeyRow(row, k) {
+    k = k || "";
+    row.classList.toggle("unset", !k);
+    $$(".kb", row).forEach((b) => b.classList.toggle("on", k.includes(b.dataset.c)));
+  }
+  function renderKeyStatus(t) {
+    const fk = St.flatKey(t);
+    const done = fk.filter(Boolean).length;
+    const el = $("#key-status");
+    if (el) el.innerHTML = done === fk.length ? `<span class="good-txt">All ${fk.length} answers entered ✓</span>` : `${done} of ${fk.length} answers entered`;
+  }
+
+  let previewTimer;
+  function updatePreview(t) {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => {
+      const el = $("#preview");
+      if (!el) return;
+      const cls = t.classIds.map(St.getClass).filter(Boolean)[0];
+      el.innerHTML = L.renderSheetSVG(t, { testCode: t.code, sheetCode: 1, studentName: "Student Name", className: cls ? cls.name : "", date: fmtDate(t.date) });
+      const lay = L.computeLayout(t);
+      $("#preview-note").innerHTML = lay.error ? `<span class="bad-txt">${esc(lay.error)}</span>` : `Preview · Letter size · each student's sheet has their name and a code strip the scanner reads.`;
+    }, 120);
+  }
+
+  /* ================================================================
+   * PRINT
+   * ================================================================ */
+
+  function viewPrint(t) {
+    const classes = t.classIds.map(St.getClass).filter(Boolean);
+    const lay = L.computeLayout(t);
+    const sel = ui(t).print || (ui(t).print = { classes: classes.map((c) => c.id), student: "", blanks: 0, key: false });
+    main.innerHTML = `
+      ${testHeader(t, "print")}
+      <div class="build-grid">
+        <div class="build-main">
+          <section class="card">
+            <h2>Print answer sheets</h2>
+            ${lay.error ? `<div class="notice bad">${esc(lay.error)} <a href="#/test/${t.id}/build">Fix the format</a></div>` : ""}
+            ${classes.length ? `
+              <div class="field">
+                <div class="label">Named sheets for</div>
+                <div class="check-row">${classes.map((c) => `<label class="check"><input type="checkbox" data-pc="${c.id}" ${sel.classes.includes(c.id) ? "checked" : ""}/> ${esc(c.name)} <span class="muted">(${c.students.length})</span></label>`).join("")}</div>
+              </div>
+              <div class="field">
+                <label>Only one student (e.g. a reprint or make-up)
+                  <select id="p-student"><option value="">— everyone in the classes above —</option>
+                    ${classes.map((c) => `<optgroup label="${esc(c.name)}">${St.sortedStudents(c).map((s) => `<option value="${s.id}" ${sel.student === s.id ? "selected" : ""}>${esc(St.studentName(s))}</option>`).join("")}</optgroup>`).join("")}
+                  </select></label>
+              </div>`
+            : `<div class="notice">This test isn't assigned to a class yet. <a href="#/test/${t.id}/build">Choose classes</a> to print named sheets, or print blank sheets below.</div>`}
+            <div class="form-row">
+              <label>Extra blank sheets <span class="muted small">(student writes their name)</span>
+                <input id="p-blanks" type="number" min="0" max="60" value="${sel.blanks}" /></label>
+            </div>
+            <label class="check"><input type="checkbox" id="p-key" ${sel.key ? "checked" : ""}/> Also print an answer-key sheet <span class="muted small">(scan it to double-check your key — it's never recorded as a student)</span></label>
+            <div class="print-go">
+              <button class="btn primary big" id="p-go" ${lay.error ? "disabled" : ""}>Print</button>
+              <span id="p-count" class="muted"></span>
+            </div>
+            <details class="help">
+              <summary>Printing tips</summary>
+              <ul>
+                <li>Letter paper, portrait. Any scaling ("fit to page", margins) is fine; the scanner finds the four corner squares.</li>
+                <li>Turn off the browser's "Headers and footers" option for a cleaner page.</li>
+                <li>Each sheet's code strip identifies the test <em>and</em> the student, so sheets can be scanned in any order, upside down, or mixed with other tests.</li>
+                <li>Reprinting a student's sheet gives the same code, so either copy can be scanned.</li>
+              </ul>
+            </details>
+          </section>
+          ${St.isPrinted(t) ? `<section class="card"><h2>Printed so far</h2><p class="muted">${t.sheets.filter((s) => s.studentId).length} named sheet(s), ${t.sheets.filter((s) => !s.studentId).length} blank sheet(s).</p></section>` : ""}
+        </div>
+        <aside class="build-preview"><div class="card sticky"><h2>Preview</h2><div id="preview" class="sheet-preview"></div></div></aside>
+      </div>`;
+
+    const jobs = () => {
+      const list = [];
+      if (sel.student) {
+        const f = St.findStudent(sel.student);
+        if (f) list.push({ student: f.student, cls: f.cls });
+      } else {
+        for (const c of classes) if (sel.classes.includes(c.id)) for (const s of St.sortedStudents(c)) list.push({ student: s, cls: c });
+      }
+      return list;
+    };
+    const update = () => {
+      const n = jobs().length + sel.blanks + (sel.key ? 1 : 0);
+      $("#p-count").textContent = `${n} sheet${n === 1 ? "" : "s"}`;
+      $("#p-go").textContent = `Print ${n} sheet${n === 1 ? "" : "s"}`;
+      $("#p-go").disabled = !!lay.error || n === 0;
+      const first = jobs()[0];
+      $("#preview").innerHTML = L.renderSheetSVG(t, {
+        testCode: t.code, sheetCode: first ? 1 : 2,
+        studentName: first ? St.studentName(first.student) : "", className: first ? first.cls.name : "", date: fmtDate(t.date),
+      });
+    };
+    $$("[data-pc]").forEach((cb) => (cb.onchange = () => { sel.classes = $$("[data-pc]").filter((x) => x.checked).map((x) => x.dataset.pc); update(); }));
+    const ps = $("#p-student");
+    if (ps) ps.onchange = () => { sel.student = ps.value; update(); };
+    $("#p-blanks").oninput = (e) => { sel.blanks = Math.max(0, Math.min(60, parseInt(e.target.value, 10) || 0)); update(); };
+    $("#p-key").onchange = (e) => { sel.key = e.target.checked; update(); };
+    $("#p-go").onclick = () => {
+      const date = fmtDate(t.date);
+      const pages = [];
+      for (const j of jobs()) {
+        const sh = St.sheetFor(t, j.student.id, j.cls.id);
+        pages.push(L.renderSheetSVG(t, { testCode: t.code, sheetCode: sh.code, studentName: St.studentName(j.student), className: j.cls.name, date }));
+      }
+      const blankCls = classes.length === 1 ? classes[0] : null;
+      for (let i = 0; i < sel.blanks; i++) {
+        const sh = St.newBlankSheet(t, blankCls && blankCls.id);
+        pages.push(L.renderSheetSVG(t, { testCode: t.code, sheetCode: sh.code, className: blankCls ? blankCls.name : "", date }));
+      }
+      if (sel.key) pages.push(L.renderSheetSVG(t, { testCode: t.code, sheetCode: L.SHEET_KEY, key: St.flatKey(t), date }));
+      t.updatedAt = St.now();
+      St.save();
+      printPages(pages);
+    };
+    update();
+  }
+
+  function printPages(svgs) {
+    const root = $("#print-root");
+    root.innerHTML = svgs.map((s) => `<div class="print-page">${s}</div>`).join("");
+    // Give the browser a moment to lay out the SVGs before opening the dialog.
+    setTimeout(() => window.print(), 150);
+  }
+  window.addEventListener("afterprint", () => { $("#print-root").innerHTML = ""; });
+
+  /* ================================================================
+   * RESULTS
+   * ================================================================ */
+
+  function viewResults(t) {
+    const classes = t.classIds.map(St.getClass).filter(Boolean);
+    const filter = ui(t).filter || "";
+    const scans = St.scansFor(t);
+    const roster = testRoster(t);
+    const rows = scans.map((scan) => {
+      const f = scan.studentId ? St.findStudent(scan.studentId) : null;
+      return { scan, student: f && f.student, cls: f && f.cls, g: St.grade(t, scan) };
+    });
+    const inFilter = (r) => !filter || (r.cls && r.cls.id === filter);
+    const named = rows.filter((r) => r.student && inFilter(r)).sort((a, b) => (a.student.last + a.student.first).localeCompare(b.student.last + b.student.first));
+    const unassigned = rows.filter((r) => !r.student && (!filter || !r.scan.studentId));
+    const scannedIds = new Set(rows.filter((r) => r.student).map((r) => r.student.id));
+    const missing = roster.filter((x) => !scannedIds.has(x.student.id) && (!filter || x.cls.id === filter));
+    const graded = named.concat(unassigned);
+    const pcts = graded.map((r) => r.g.pct).sort((a, b) => a - b);
+    const mean = pcts.length ? pcts.reduce((a, b) => a + b, 0) / pcts.length : NaN;
+    const median = pcts.length ? (pcts[Math.floor((pcts.length - 1) / 2)] + pcts[Math.ceil((pcts.length - 1) / 2)]) / 2 : NaN;
+    const fk = St.flatKey(t);
+    const qc = L.questionChoices(t);
+    const nflag = (r) => r.scan.flags.filter((f, i) => f && (r.scan.overrides || {})[i] == null).length;
+
+    main.innerHTML = `
+      ${testHeader(t, "results")}
+      <div class="results-top">
+        ${classes.length > 1 ? `<label>Class <select id="r-filter"><option value="">All classes</option>${classes.map((c) => `<option value="${c.id}" ${filter === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>` : ""}
+        <div class="spacer"></div>
+        <button class="btn" id="r-csv" ${graded.length ? "" : "disabled"}>Export CSV</button>
+      </div>
+      ${fk.some((k) => !k) ? `<div class="notice">The answer key is incomplete (${fk.filter(Boolean).length}/${fk.length}). Unkeyed questions aren't scored. <a href="#/test/${t.id}/build">Finish the key</a></div>` : ""}
+      <div class="stats">
+        <div class="stat"><div class="stat-n">${graded.length}${roster.length ? `<span class="muted">/${missing.length + named.length}</span>` : ""}</div><div class="stat-l">scanned</div></div>
+        <div class="stat"><div class="stat-n">${pct(mean)}</div><div class="stat-l">mean</div></div>
+        <div class="stat"><div class="stat-n">${pct(median)}</div><div class="stat-l">median</div></div>
+        <div class="stat"><div class="stat-n">${pcts.length ? pct(pcts[pcts.length - 1]) : "–"}</div><div class="stat-l">high</div></div>
+        <div class="stat"><div class="stat-n">${pcts.length ? pct(pcts[0]) : "–"}</div><div class="stat-l">low</div></div>
+      </div>
+
+      <section class="card">
+        <h2>Students</h2>
+        ${graded.length === 0 && missing.length === 0 ? `<p class="muted">Nothing scanned yet. Go to <a href="#/scan">Scan</a>.</p>` : `
+        <div class="table-wrap"><table class="table">
+          <thead><tr><th>Student</th>${classes.length > 1 ? "<th>Class</th>" : ""}<th class="num">Score</th><th class="num">%</th><th>Check</th><th>Scanned</th><th></th></tr></thead>
+          <tbody>
+            ${named.map((r) => `<tr>
+              <td>${esc(St.studentName(r.student))}</td>${classes.length > 1 ? `<td>${esc(r.cls.name)}</td>` : ""}
+              <td class="num">${fmtPts(r.g.score)}/${fmtPts(r.g.possible)}</td><td class="num"><strong>${pct(r.g.pct)}</strong></td>
+              <td>${nflag(r) ? `<span class="pill warn">${nflag(r)} to check</span>` : ""}${Object.keys(r.scan.overrides || {}).length ? `<span class="pill">edited</span>` : ""}</td>
+              <td class="muted small">${fmtTime(r.scan.scannedAt)}</td>
+              <td><button class="btn small" data-review="${r.scan.id}">Review</button></td></tr>`).join("")}
+            ${unassigned.map((r) => `<tr class="unassigned">
+              <td><em>Blank sheet #${r.scan.sheetCode}</em> → <select data-assign="${r.scan.id}"><option value="">who is this?</option>${roster.map((x) => `<option value="${x.student.id}">${esc(St.studentName(x.student))}</option>`).join("")}</select></td>${classes.length > 1 ? "<td></td>" : ""}
+              <td class="num">${fmtPts(r.g.score)}/${fmtPts(r.g.possible)}</td><td class="num"><strong>${pct(r.g.pct)}</strong></td>
+              <td>${nflag(r) ? `<span class="pill warn">${nflag(r)} to check</span>` : ""}</td>
+              <td class="muted small">${fmtTime(r.scan.scannedAt)}</td>
+              <td><button class="btn small" data-review="${r.scan.id}">Review</button></td></tr>`).join("")}
+            ${missing.map((x) => `<tr class="missing"><td>${esc(St.studentName(x.student))}</td>${classes.length > 1 ? `<td>${esc(x.cls.name)}</td>` : ""}<td colspan="5" class="muted">not scanned</td></tr>`).join("")}
+          </tbody>
+        </table></div>`}
+      </section>
+
+      ${graded.length ? `<section class="card">
+        <h2>Item analysis</h2>
+        <p class="muted small">How often each answer was chosen. The correct answer is highlighted; questions most students missed are flagged.</p>
+        <div class="table-wrap"><table class="table items">
+          <thead><tr><th>Q</th><th>Key</th><th class="num">Correct</th><th>Responses</th></tr></thead>
+          <tbody>${qc.map((ch, i) => {
+            const counts = {};
+            let blank = 0, multi = 0, correct = 0;
+            for (const r of graded) {
+              const it = r.g.items[i];
+              if (!it) continue;
+              if (!it.resp) blank++; else if (it.resp.length > 1) multi++; else counts[it.resp] = (counts[it.resp] || 0) + 1;
+              if (it.correct) correct++;
+            }
+            const p = fk[i] ? (100 * correct) / graded.length : NaN;
+            const bar = (label, n, isKey) => `<span class="resp ${isKey ? "key" : ""}" title="${n} chose ${label}"><b>${esc(label)}</b> ${n}<i style="width:${(100 * n) / graded.length}%"></i></span>`;
+            return `<tr class="${fk[i] && p < 50 ? "hard" : ""}"><td>${i + 1}</td><td>${esc(fk[i] || "—")}</td><td class="num">${pct(p)}</td>
+              <td class="resp-cell">${ch.map((c) => bar(c, counts[c] || 0, (fk[i] || "").includes(c))).join("")}${blank ? `<span class="resp other">blank ${blank}</span>` : ""}${multi ? `<span class="resp other">multiple ${multi}</span>` : ""}</td></tr>`;
+          }).join("")}</tbody>
+        </table></div>
+      </section>` : ""}`;
+
+    const rf = $("#r-filter");
+    if (rf) rf.onchange = () => { ui(t).filter = rf.value; viewResults(t); };
+    $$("[data-review]").forEach((b) => (b.onclick = () => openReview(b.dataset.review, () => viewResults(t))));
+    $$("[data-assign]").forEach((s) => (s.onchange = () => {
+      const scan = St.db.scans.find((x) => x.id === s.dataset.assign);
+      if (!s.value) return;
+      const other = St.db.scans.find((x) => x.testId === t.id && x.studentId === s.value && x.id !== scan.id);
+      if (other && !confirm("That student already has a scanned sheet for this test. Keep both?")) { s.value = ""; return; }
+      scan.studentId = s.value; scan.updatedAt = St.now();
+      St.save(); viewResults(t);
+    }));
+    $("#r-csv").onclick = () => {
+      const head = ["Last", "First", "Class", "Score", "Possible", "Percent", ...qc.map((_, i) => "Q" + (i + 1))];
+      const lines = [head];
+      for (const r of graded) {
+        lines.push([r.student ? r.student.last : "", r.student ? r.student.first : `Blank sheet #${r.scan.sheetCode}`, r.cls ? r.cls.name : "",
+          fmtPts(r.g.score), fmtPts(r.g.possible), (Math.round(r.g.pct * 10) / 10).toString(), ...r.g.items.map((it) => it.resp)]);
+      }
+      lines.push(["", "KEY", "", "", "", "", ...fk]);
+      const csv = lines.map((l) => l.map((v) => /[",\n]/.test(v) ? `"${String(v).replace(/"/g, '""')}"` : v).join(",")).join("\n");
+      download(`${(t.title || "test").replace(/[^\w\- ]+/g, "").trim() || "test"} results.csv`, csv, "text/csv");
+    };
+  }
+
+  /* ---------------- review / override modal ---------------- */
+
+  function closeModal() {
+    const m = $("#modal");
+    if (m._url) { URL.revokeObjectURL(m._url); m._url = null; }
+    m.classList.add("hidden");
+    m.innerHTML = "";
+    document.body.classList.remove("modal-open");
+  }
+
+  async function openReview(scanId, onDone) {
+    const scan = St.db.scans.find((s) => s.id === scanId);
+    if (!scan) return;
+    const t = St.getTest(scan.testId);
+    const m = $("#modal");
+    m.classList.remove("hidden");
+    document.body.classList.add("modal-open");
+    const blob = await St.getImage(scan.id);
+    if (m._url) URL.revokeObjectURL(m._url);
+    m._url = blob ? URL.createObjectURL(blob) : null;
+    const lay = L.computeLayout(t);
+    const done = () => { closeModal(); if (onDone) onDone(); };
+
+    const render = () => {
+      const g = St.grade(t, scan);
+      const f = scan.studentId ? St.findStudent(scan.studentId) : null;
+      const ov = scan.overrides || (scan.overrides = {});
+      const overlay = lay.questions.map((q) => {
+        const it = g.items[q.index] || { resp: "", key: "" };
+        const [dx, dy] = (scan.offsets && scan.offsets[q.index]) || [0, 0];
+        const flag = scan.flags[q.index] && ov[q.index] == null;
+        let s = flag ? `<rect x="${q.x + dx - 1}" y="${q.cy + dy - 3.3}" width="${q.bubbles[q.bubbles.length - 1].cx - q.x + 4.5}" height="6.6" rx="1.2" fill="#f5a623" opacity="0.28"/>` : "";
+        for (const b of q.bubbles) {
+          const picked = it.resp.includes(b.label), isKey = (it.key || "").includes(b.label);
+          if (picked) s += `<circle cx="${b.cx + dx}" cy="${b.cy + dy}" r="${L.BUBBLE_R + 0.7}" fill="none" stroke="${it.correct ? "#1a9b54" : it.key ? "#d93025" : "#2457c5"}" stroke-width="0.7"/>`;
+          else if (isKey && !it.correct) s += `<circle cx="${b.cx + dx}" cy="${b.cy + dy}" r="${L.BUBBLE_R + 0.7}" fill="none" stroke="#1a9b54" stroke-width="0.5" stroke-dasharray="1 0.8"/>`;
+        }
+        return `<g data-q="${q.index}">${s}</g>`;
+      }).join("");
+      m.innerHTML = `
+        <div class="modal-box review">
+          <div class="modal-head">
+            <div>
+              <h2>${f ? esc(St.studentName(f.student)) : `Blank sheet #${scan.sheetCode}`}</h2>
+              <div class="muted small">${esc(t.title)} · scanned ${fmtTime(scan.scannedAt)}</div>
+            </div>
+            <div class="score-big">${fmtPts(g.score)}/${fmtPts(g.possible)} <span>${pct(g.pct)}</span></div>
+            <button class="icon-btn" id="m-close" title="Close">✕</button>
+          </div>
+          <div class="review-body">
+            <div class="review-img">
+              ${m._url ? `<div class="img-wrap"><img src="${m._url}" alt="Scanned sheet"/><svg viewBox="0 0 ${L.PAGE.w} ${L.PAGE.h}" class="img-overlay">${overlay}</svg></div>`
+                : `<p class="muted">No image saved for this scan (images stay on the device that scanned them).</p>`}
+              <p class="legend small"><span class="lg good"></span>correct <span class="lg bad"></span>wrong <span class="lg key"></span>correct answer <span class="lg flag"></span>check this</p>
+            </div>
+            <div class="review-list">
+              <p class="muted small">Click a letter to correct what the scanner read. Highlighted rows need a look.</p>
+              ${lay.questions.map((q) => {
+                const i = q.index, it = g.items[i] || {};
+                const flag = scan.flags[i];
+                const edited = ov[i] != null;
+                return `<div class="ov-row ${flag && !edited ? "flag" : ""}" data-i="${i}">
+                  <span class="qn">${i + 1}</span>
+                  <span class="ov-btns">${["", ...q.bubbles.map((b) => b.label)].map((c) => `<button class="ob ${it.resp === c ? "on" : ""} ${c && (it.key || "").includes(c) ? "is-key" : ""}" data-c="${esc(c)}" title="${c ? c : "blank"}">${c || "–"}</button>`).join("")}
+                  ${it.resp && it.resp.length > 1 ? `<button class="ob on" disabled>${esc(it.resp)}</button>` : ""}</span>
+                  <span class="ov-mark">${it.correct === true ? "✓" : it.correct === false ? "✗" : ""}</span>
+                  <span class="ov-note small">${edited ? `edited (read “${esc(scan.responses[i] || "blank")}”) <a href="#" data-undo="${i}">undo</a>` : flag ? esc({ multiple: "two bubbles filled", erasure: "possible erasure", faint: "very light mark", unclear: "hard to read" }[flag] || flag) : ""}</span>
+                </div>`;
+              }).join("")}
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="btn danger ghost" id="m-del">Delete this scan</button>
+            <div class="spacer"></div>
+            <button class="btn primary" id="m-done">Done</button>
+          </div>
+        </div>`;
+      $("#m-close").onclick = done;
+      $("#m-done").onclick = done;
+      $("#m-del").onclick = () => { if (confirm("Delete this scanned sheet?")) { St.deleteScan(scan); done(); } };
+      $$(".ov-row").forEach((row) => {
+        const i = +row.dataset.i;
+        $$(".ob[data-c]", row).forEach((b) => (b.onclick = () => {
+          const c = b.dataset.c;
+          if (c === (scan.responses[i] || "")) delete ov[i]; else ov[i] = c;
+          scan.updatedAt = St.now(); St.save(); render();
+        }));
+        const u = $("[data-undo]", row);
+        if (u) u.onclick = (e) => { e.preventDefault(); delete ov[i]; scan.updatedAt = St.now(); St.save(); render(); };
+      });
+    };
+    render();
+    m.onclick = (e) => { if (e.target === m) done(); };
+  }
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#modal").classList.contains("hidden")) $("#m-done") ? $("#m-done").click() : closeModal(); });
+
+  /* ================================================================
+   * CLASSES
+   * ================================================================ */
+
+  function viewClasses(selId) {
+    const classes = St.db.classes;
+    const cls = St.getClass(selId) || classes[0];
+    main.innerHTML = `
+      <div class="page-head"><h1>Classes</h1><button class="btn primary" id="c-new">+ New class</button></div>
+      ${classes.length === 0 ? `<div class="card"><p>Add a class, then paste in its roster: one student per line.</p></div>` : `
+      <div class="classes-grid">
+        <nav class="class-list card">
+          ${classes.map((c) => `<a href="#/classes/${c.id}" class="${cls && c.id === cls.id ? "active" : ""}">${esc(c.name)} <span class="muted">${c.students.length}</span></a>`).join("")}
+        </nav>
+        <section class="card" id="class-editor"></section>
+      </div>`}`;
+    $("#c-new").onclick = () => {
+      const name = prompt("Class name (e.g. “Algebra II – Period 3”)");
+      if (!name) return;
+      const c = St.addClass(name.trim());
+      location.hash = `#/classes/${c.id}`;
+    };
+    if (cls) renderClassEditor(cls);
+  }
+
+  function renderClassEditor(cls) {
+    const el = $("#class-editor");
+    const students = St.sortedStudents(cls);
+    el.innerHTML = `
+      <div class="form-row"><label class="grow">Class name <input id="c-name" value="${esc(cls.name)}"/></label></div>
+      <h2>Roster <span class="muted small">(${students.length})</span></h2>
+      ${students.length ? `<div class="table-wrap"><table class="table roster">
+        <thead><tr><th>First</th><th>Last</th><th></th></tr></thead>
+        <tbody>${students.map((s) => `<tr data-sid="${s.id}"><td><input class="s-first" value="${esc(s.first)}"/></td><td><input class="s-last" value="${esc(s.last)}"/></td><td><button class="icon-btn danger" data-rm title="Remove">✕</button></td></tr>`).join("")}</tbody>
+      </table></div>` : `<p class="muted">No students yet.</p>`}
+      <div class="field">
+        <label>Add students: paste one per line as <code>Last, First</code>, <code>First Last</code>, or two spreadsheet columns
+          <textarea id="c-paste" rows="5" placeholder="Garcia, Maria&#10;Chen, David&#10;Sam Okafor"></textarea></label>
+        <button class="btn" id="c-add">Add to roster</button>
+      </div>
+      <div class="danger-zone"><button class="btn ghost danger small" id="c-del">Delete class</button></div>`;
+    $("#c-name").oninput = (e) => { cls.name = e.target.value; cls.updatedAt = St.now(); saveSoon(); const a = $(`.class-list a.active`); if (a) a.firstChild.textContent = cls.name + " "; };
+    $$("tr[data-sid]", el).forEach((tr) => {
+      const s = cls.students.find((x) => x.id === tr.dataset.sid);
+      $(".s-first", tr).oninput = (e) => { s.first = e.target.value.trim(); cls.updatedAt = St.now(); saveSoon(); };
+      $(".s-last", tr).oninput = (e) => { s.last = e.target.value.trim(); cls.updatedAt = St.now(); saveSoon(); };
+      $("[data-rm]", tr).onclick = () => {
+        if (!confirm(`Remove ${St.studentName(s)} from ${cls.name}? Their scanned results stay in your tests.`)) return;
+        cls.students = cls.students.filter((x) => x !== s); cls.updatedAt = St.now(); St.save(); viewClasses(cls.id);
+      };
+    });
+    $("#c-add").onclick = () => {
+      const list = St.parseRoster($("#c-paste").value);
+      if (!list.length) return;
+      for (const p of list) cls.students.push({ id: St.uid(), first: p.first, last: p.last });
+      cls.updatedAt = St.now(); St.save();
+      toast(`Added ${list.length} student${list.length > 1 ? "s" : ""}.`);
+      viewClasses(cls.id);
+    };
+    $("#c-del").onclick = () => {
+      if (!confirm(`Delete the class "${cls.name}"? Tests and scanned results are kept.`)) return;
+      St.db.classes = St.db.classes.filter((c) => c !== cls);
+      for (const t of St.db.tests) t.classIds = t.classIds.filter((id) => id !== cls.id);
+      St.save(); location.hash = "#/classes";
+    };
+  }
+
+  /* ================================================================
+   * SCAN
+   * ================================================================ */
+
+  const cam = { stream: null, running: false, timer: null, lastSig: null, committed: null, lastSeen: 0, audio: null, busy: false };
+  const session = []; // scans made since the page was opened
+
+  function viewScan() {
+    const secure = window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+    main.innerHTML = `
+      <div class="page-head"><h1>Scan</h1></div>
+      <div class="scan-grid">
+        <section class="card scan-cam">
+          <div class="scan-controls">
+            <button class="btn primary" id="cam-start" ${secure ? "" : "disabled"}>Start camera</button>
+            <button class="btn hidden" id="cam-stop">Stop</button>
+            <select id="cam-select" class="hidden"></select>
+            <div class="spacer"></div>
+            <label class="btn" for="photo-in">Scan photos…</label>
+            <input type="file" id="photo-in" accept="image/*" multiple class="visually-hidden" />
+          </div>
+          ${secure ? "" : `<div class="notice">The camera needs the app to be opened over https (e.g. the GitHub Pages link). You can still scan photos.</div>`}
+          <div class="video-wrap hidden" id="video-wrap">
+            <video id="video" playsinline muted></video>
+            <canvas id="overlay"></canvas>
+            <div id="flash" class="flash"></div>
+          </div>
+          <div id="scan-status" class="scan-status">Any sheet from any of your tests can be scanned here, in any order; each sheet's code tells MultiGrader which test and student it is.</div>
+          <details class="help">
+            <summary>Tips for clean scans</summary>
+            <ul>
+              <li>Lay the sheet flat on a darker surface with even light; avoid strong shadows across the bubbles.</li>
+              <li>All four corner squares must be in view. Sideways or upside-down is fine.</li>
+              <li>Hold still for a moment; the sheet is recorded when two frames agree, then you'll hear a beep.</li>
+              <li>Phone: open this page in the browser and tap <em>Start camera</em> (uses the back camera). Or take photos with the camera app and use <em>Scan photos…</em> to grade a whole stack at once.</li>
+              <li>Scanning a sheet again replaces its earlier result.</li>
+            </ul>
+          </details>
+        </section>
+        <section class="card scan-log">
+          <h2>Scanned this session</h2>
+          <div id="scan-list"></div>
+        </section>
+      </div>`;
+    $("#cam-start").onclick = () => startCamera();
+    $("#cam-stop").onclick = () => { stopCamera(); viewScanControls(false); };
+    $("#cam-select").onchange = (e) => startCamera(e.target.value);
+    $("#photo-in").onchange = (e) => scanFiles([...e.target.files]).then(() => (e.target.value = ""));
+    renderSessionList();
+  }
+
+  function viewScanControls(on) {
+    const s = $("#cam-start"), x = $("#cam-stop"), w = $("#video-wrap");
+    if (!s) return;
+    s.classList.toggle("hidden", on); x.classList.toggle("hidden", !on); w.classList.toggle("hidden", !on);
+    $("#cam-select").classList.toggle("hidden", !on || $("#cam-select").options.length < 2);
+  }
+
+  function setStatus(html, kind) {
+    const el = $("#scan-status");
+    if (el) { el.innerHTML = html; el.className = "scan-status " + (kind || ""); }
+  }
+
+  async function startCamera(deviceId) {
+    stopCamera();
+    try {
+      if (!cam.audio) { try { cam.audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { /* no audio */ } }
+      if (cam.audio && cam.audio.state === "suspended") cam.audio.resume();
+      const video = deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: "environment" } };
+      Object.assign(video, { width: { ideal: 1920 }, height: { ideal: 1080 } });
+      cam.stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+      const v = $("#video");
+      if (!v) { stopCamera(); return; }
+      v.srcObject = cam.stream;
+      await v.play();
+      const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
+      const cur = cam.stream.getVideoTracks()[0].getSettings().deviceId;
+      $("#cam-select").innerHTML = devs.map((d, i) => `<option value="${d.deviceId}" ${d.deviceId === cur ? "selected" : ""}>${esc(d.label || "Camera " + (i + 1))}</option>`).join("");
+      viewScanControls(true);
+      $("#video-wrap").style.aspectRatio = `${v.videoWidth} / ${v.videoHeight}`;
+      cam.running = true;
+      cam.lastSig = null; cam.committed = null;
+      setStatus("Looking for a sheet…");
+      loop();
+    } catch (e) {
+      setStatus(`Couldn't start the camera: ${esc(e.message || e.name)}. Check the browser's camera permission.`, "bad");
+    }
+  }
+
+  function stopCamera() {
+    cam.running = false;
+    clearTimeout(cam.timer);
+    if (cam.stream) { cam.stream.getTracks().forEach((t) => t.stop()); cam.stream = null; }
+  }
+
+  const work = document.createElement("canvas");
+  const wctx = work.getContext("2d", { willReadFrequently: true });
+
+  function loop() {
+    if (!cam.running) return;
+    const v = $("#video");
+    if (!v) { stopCamera(); return; }
+    if (v.readyState >= 2 && v.videoWidth && !cam.busy) {
+      cam.busy = true;
+      try { processFrame(v); } catch (e) { console.error(e); }
+      cam.busy = false;
+    }
+    cam.timer = setTimeout(loop, 90);
+  }
+
+  function processFrame(v) {
+    const w = v.videoWidth, h = v.videoHeight;
+    if (work.width !== w || work.height !== h) { work.width = w; work.height = h; }
+    wctx.drawImage(v, 0, 0, w, h);
+    const data = wctx.getImageData(0, 0, w, h);
+    const res = S.scan(data, { getTest: St.testByCode });
+    drawOverlay(res, w, h);
+    const nowMs = Date.now();
+    if (res.status === "ok") {
+      const key = res.test.id + ":" + res.sheetCode;
+      cam.lastSeen = nowMs;
+      if (cam.committed === key) { return; }
+      const sig = key + "|" + res.responses.join(",");
+      if (cam.lastSig === sig) {
+        cam.committed = key;
+        cam.lastSig = null;
+        commitScan(data, "camera");
+      } else {
+        cam.lastSig = sig;
+        setStatus("Reading… hold steady");
+      }
+      return;
+    }
+    cam.lastSig = null;
+    if (nowMs - cam.lastSeen > 1200) cam.committed = null;
+    if (cam.committed) return; // keep the last result on screen until the sheet is removed
+    if (res.status === "unknown-test") setStatus(`This sheet is for a test that isn't on this device (test ${res.testCode}). Import it from <a href="#/data">Data</a>.`, "warn");
+    else if (res.status === "no-code") setStatus("Sheet found. Hold it flat and fully in view…");
+    else if (res.status === "layout-error") setStatus("This test's format can't be laid out on a sheet.", "bad");
+    else setStatus("Looking for a sheet… (all four corner squares need to be visible)");
+  }
+
+  function drawOverlay(res, w, h) {
+    const c = $("#overlay");
+    if (!c) return;
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    const ctx = c.getContext("2d");
+    ctx.clearRect(0, 0, w, h);
+    const lw = Math.max(2, w / 400);
+    ctx.lineWidth = lw;
+    for (const m of res.markers || []) {
+      ctx.strokeStyle = "rgba(255,170,0,.9)";
+      ctx.beginPath(); ctx.arc(m.x, m.y, m.size * 0.7, 0, Math.PI * 2); ctx.stroke();
+    }
+    if (res.corners) {
+      ctx.strokeStyle = res.status === "ok" ? "rgba(26,155,84,.95)" : "rgba(255,170,0,.9)";
+      ctx.lineWidth = lw * 1.5;
+      ctx.beginPath();
+      res.corners.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.closePath(); ctx.stroke();
+    }
+    if (res.status === "ok") {
+      const lay = L.computeLayout(res.test);
+      ctx.fillStyle = "rgba(36,87,197,.8)";
+      for (const q of lay.questions) {
+        const [dx, dy] = res.offsets[q.index];
+        for (const b of q.bubbles) {
+          if (!res.responses[q.index].includes(b.label)) continue;
+          const [x, y] = S.project(res.H, b.cx + dx, b.cy + dy);
+          ctx.beginPath(); ctx.arc(x, y, lw * 2.2, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+    }
+  }
+
+  function beep(ok) {
+    if (navigator.vibrate) navigator.vibrate(ok ? 60 : [40, 60, 40]);
+    const a = cam.audio;
+    if (!a) return;
+    const o = a.createOscillator(), g = a.createGain();
+    o.frequency.value = ok ? 880 : 330;
+    g.gain.setValueAtTime(0.15, a.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + 0.18);
+    o.connect(g); g.connect(a.destination);
+    o.start(); o.stop(a.currentTime + 0.2);
+  }
+
+  /* Full-quality read of an accepted frame or photo, then save it. */
+  async function commitScan(data, source, fileName) {
+    const res = S.scan(data, { getTest: St.testByCode, rectifyWidth: 850 });
+    if (res.status !== "ok") {
+      return { ok: false, msg: { "unknown-test": `sheet for a test that isn't on this device (test ${res.testCode})`, "no-code": "found the sheet but couldn't read its code strip", "layout-error": "this test's format can't be laid out" }[res.status] || "no answer sheet found" };
+    }
+    const t = res.test;
+    if (res.sheetCode === L.SHEET_KEY) {
+      const fk = St.flatKey(t);
+      const diffs = fk.map((k, i) => (k !== res.responses[i] ? i + 1 : null)).filter(Boolean);
+      const msg = diffs.length ? `Answer key sheet: differs from the saved key on Q${diffs.join(", Q")}` : `Answer key sheet matches your saved key ✓`;
+      if (source === "camera") { setStatus(msg, diffs.length ? "warn" : "good"); beep(!diffs.length); flash(!diffs.length); }
+      return { ok: true, msg, keyCheck: true };
+    }
+    const { scan, replaced } = St.saveScan(t, res);
+    if (res.rectified) grayToBlob(res.rectified).then((b) => b && St.putImage(scan.id, b));
+    const g = St.grade(t, scan);
+    const f = scan.studentId ? St.findStudent(scan.studentId) : null;
+    const who = f ? St.studentName(f.student) : `Blank sheet #${scan.sheetCode}`;
+    const nflag = res.flags.filter(Boolean).length;
+    const entry = { scanId: scan.id, who, test: t.title, g, nflag, replaced, at: Date.now(), source: fileName || source };
+    session.unshift(entry);
+    if (source === "camera") {
+      setStatus(`<strong>✓ ${esc(who)}</strong> · ${esc(t.title)} · ${fmtPts(g.score)}/${fmtPts(g.possible)} (${pct(g.pct)})${nflag ? ` · <span class="warn-txt">${nflag} to check</span>` : ""}${replaced ? " · replaced earlier scan" : ""}<br><span class="muted small">Next sheet…</span>`, "good");
+      beep(true); flash(true);
+    }
+    renderSessionList();
+    return { ok: true, entry };
+  }
+
+  function flash(ok) {
+    const f = $("#flash");
+    if (!f) return;
+    f.className = "flash " + (ok ? "ok" : "warn");
+    setTimeout(() => (f.className = "flash"), 350);
+  }
+
+  async function scanFiles(files) {
+    if (!files.length) return;
+    let okN = 0;
+    const fails = [];
+    for (let i = 0; i < files.length; i++) {
+      setStatus(`Scanning photo ${i + 1} of ${files.length}…`);
+      await new Promise((r) => setTimeout(r, 0));
+      try {
+        const bmp = await createImageBitmap(files[i]);
+        const k = Math.min(1, 2600 / Math.max(bmp.width, bmp.height));
+        const w = Math.round(bmp.width * k), h = Math.round(bmp.height * k);
+        work.width = w; work.height = h;
+        wctx.drawImage(bmp, 0, 0, w, h);
+        const r = await commitScan(wctx.getImageData(0, 0, w, h), "photo", files[i].name);
+        if (r.ok) { okN++; if (r.keyCheck) fails.push(`${files[i].name}: ${r.msg}`); } else fails.push(`${files[i].name}: ${r.msg}`);
+      } catch (e) {
+        fails.push(`${files[i].name}: couldn't open this image (${e.message || e.name})`);
+      }
+    }
+    setStatus(`Scanned ${okN} of ${files.length} photo${files.length > 1 ? "s" : ""}.` + (fails.length ? `<ul class="small">${fails.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>` : ""), fails.length ? "warn" : "good");
+  }
+
+  function renderSessionList() {
+    const el = $("#scan-list");
+    if (!el) return;
+    el.innerHTML = session.length ? `<ul class="scan-items">${session.map((e) => `
+      <li><button class="linkish" data-review="${e.scanId}"><strong>${esc(e.who)}</strong></button>
+        <span class="muted small">${esc(e.test)}</span>
+        <span class="score">${fmtPts(e.g.score)}/${fmtPts(e.g.possible)} · ${pct(e.g.pct)}</span>
+        ${e.nflag ? `<span class="pill warn">${e.nflag} to check</span>` : ""}${e.replaced ? `<span class="pill">rescanned</span>` : ""}</li>`).join("")}</ul>`
+      : `<p class="muted">Sheets you scan appear here. Click one to review it or fix a misread bubble.</p>`;
+    $$("[data-review]", el).forEach((b) => (b.onclick = () => {
+      const wasRunning = cam.running;
+      cam.running = false;
+      openReview(b.dataset.review, () => {
+        const e = session.find((x) => x.scanId === b.dataset.review);
+        const scan = St.db.scans.find((s) => s.id === b.dataset.review);
+        if (e && scan) e.g = St.grade(St.getTest(scan.testId), scan);
+        if (e && !scan) session.splice(session.indexOf(e), 1);
+        renderSessionList();
+        if (wasRunning && cam.stream) { cam.running = true; loop(); }
+      });
+    }));
+  }
+
+  /* ================================================================
+   * DATA (backup / move between devices)
+   * ================================================================ */
+
+  function viewData() {
+    const d = St.db;
+    const size = new Blob([localStorage.getItem("multigrader.db.v1") || ""]).size;
+    main.innerHTML = `
+      <div class="page-head"><h1>Data</h1></div>
+      <section class="card">
+        <h2>Where your data lives</h2>
+        <p>Everything (classes, tests, keys, and results) is stored <strong>only in this browser on this device</strong>. Nothing is uploaded anywhere.
+          You have ${d.classes.length} class${d.classes.length === 1 ? "" : "es"}, ${d.tests.length} test${d.tests.length === 1 ? "" : "s"}, and ${d.scans.length} scanned sheet${d.scans.length === 1 ? "" : "s"} (${(size / 1024).toFixed(0)} KB).</p>
+      </section>
+      <section class="card">
+        <h2>Back up or move to another device</h2>
+        <p class="muted">Use this to scan on your phone with tests made on your laptop: export here, send the file to your phone (AirDrop, email, Drive), and import it there. After scanning, export from the phone and import back on the laptop. Imports <strong>merge</strong>: newer edits win, and nothing on this device is deleted.</p>
+        <div class="btn-row">
+          <button class="btn primary" id="d-export">Export backup</button>
+          <label class="btn" for="d-import">Import / merge…</label>
+          <input type="file" id="d-import" accept=".json,application/json" class="visually-hidden"/>
+        </div>
+        <p class="muted small">Backups contain student names and scores; treat the file like a gradebook. Scanned-sheet images aren't included.</p>
+      </section>
+      <section class="card">
+        <h2>Start over</h2>
+        <button class="btn danger ghost" id="d-erase">Erase everything on this device…</button>
+      </section>`;
+    $("#d-export").onclick = () => download(`multigrader-backup-${St.today()}.json`, St.exportJSON(), "application/json");
+    $("#d-import").onchange = async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      try {
+        const c = St.importJSON(await f.text());
+        toast(`Imported: ${c.classes} class(es), ${c.tests} test(s), ${c.scans} scan(s) added or updated.`, "good");
+        viewData();
+      } catch (err) { alert("Import failed: " + err.message); }
+      e.target.value = "";
+    };
+    $("#d-erase").onclick = () => {
+      if (prompt('This deletes all classes, tests and results on this device. Type ERASE to confirm.') === "ERASE") { St.eraseAll(); toast("All data erased."); viewData(); }
+    };
+  }
+
+  route();
+})();

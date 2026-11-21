@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MultiGrader</title>
+  <meta name="description" content="Build multiple-choice tests with built-in answer sheets, print named sheets, and grade them with your phone or webcam." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232457c5'/%3E%3Ccircle cx='11' cy='12' r='4' fill='%23fff'/%3E%3Ccircle cx='21' cy='12' r='4' fill='none' stroke='%23fff' stroke-width='2'/%3E%3Ccircle cx='11' cy='22' r='4' fill='none' stroke='%23fff' stroke-width='2'/%3E%3Ccircle cx='21' cy='22' r='4' fill='%23fff'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand"><span class="logo" aria-hidden="true"></span>MultiGrader</div>
+    <nav class="nav">
+      <a href="#/tests" data-nav="tests">Tests</a>
+      <a href="#/classes" data-nav="classes">Classes</a>
+      <a href="#/scan" data-nav="scan">Scan</a>
+      <a href="#/data" data-nav="data">Data</a>
+    </nav>
+  </header>
+
+  <main id="main"></main>
+
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true"></div>
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- Answer sheets are rendered here only when printing. -->
+  <div id="print-root"></div>
+
+  <script src="js/layout.js"></script>
+  <script src="js/scanner.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

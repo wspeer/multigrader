@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Scanner tests</title></head>
+<body>
+<canvas id="out"></canvas>
+<script src="../js/layout.js"></script>
+<script src="../js/scanner.js"></script>
+<script>
+/* Synthetic end-to-end tests for the scanner: render a real sheet, "fill it in"
+ * with pencil-like marks, photograph it (perspective, curl, lighting, blur,
+ * noise, JPEG) and check the scanner reads back exactly what was marked. */
+const L = MGLayout, S = MGScanner;
+
+function rng(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
+
+async function svgToCanvas(svg, pxPerMm) {
+  const W = Math.round(L.PAGE.w * pxPerMm), H = Math.round(L.PAGE.h * pxPerMm);
+  const img = new Image();
+  const sized = svg.replace(/width="[^"]*mm" height="[^"]*mm"/, `width="${W}" height="${H}"`);
+  img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(sized);
+  await img.decode();
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const ctx = c.getContext("2d"); ctx.drawImage(img, 0, 0, W, H);
+  return c;
+}
+
+function pencil(ctx, k, cx, cy, r, rand, strength) {
+  ctx.save();
+  const g = 40 + rand() * 50;
+  ctx.fillStyle = `rgba(${g},${g},${g + 5},${strength})`;
+  ctx.beginPath();
+  ctx.ellipse((cx + (rand() - 0.5) * 0.7) * k, (cy + (rand() - 0.5) * 0.7) * k, r * (0.8 + rand() * 0.3) * k, r * (0.75 + rand() * 0.3) * k, rand() * 3, 0, Math.PI * 2);
+  ctx.fill();
+  // scribble texture
+  ctx.strokeStyle = `rgba(${g},${g},${g},${strength * 0.6})`;
+  ctx.lineWidth = 0.35 * k;
+  for (let i = 0; i < 6; i++) {
+    ctx.beginPath();
+    ctx.moveTo((cx - r + rand() * r * 2) * k, (cy - r + rand() * 0.6) * k);
+    ctx.lineTo((cx - r + rand() * r * 2) * k, (cy + r - rand() * 0.6) * k);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function invert3(m) {
+  const [a, b, c, d, e, f, g, h, i] = m;
+  const A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;
+  const det = a * A + b * B + c * C;
+  return [A / det, -(b * i - c * h) / det, (b * f - c * e) / det, B / det, (a * i - c * g) / det, -(a * f - c * d) / det, C / det, -(a * h - b * g) / det, (a * e - b * d) / det];
+}
+
+/* Photograph the page canvas into an outW×outH image. */
+function photograph(page, outW, outH, corners, rand, o) {
+  const pctx = page.getContext("2d");
+  const P = pctx.getImageData(0, 0, page.width, page.height);
+  const src = [[0, 0], [page.width, 0], [page.width, page.height], [0, page.height]];
+  const H = S.solveHomography(src, corners);
+  const Hi = invert3(H);
+  const out = new ImageData(outW, outH);
+  const bow = o.bow || 0;
+  for (let y = 0; y < outH; y++) for (let x = 0; x < outW; x++) {
+    const z = Hi[6] * x + Hi[7] * y + Hi[8];
+    let u = (Hi[0] * x + Hi[1] * y + Hi[2]) / z, v = (Hi[3] * x + Hi[4] * y + Hi[5]) / z;
+    // paper curl: bulge the middle of the page
+    u += bow * Math.sin(Math.PI * v / page.height) * Math.sin(Math.PI * u / page.width) * page.width / 215.9;
+    v += bow * 0.6 * Math.sin(Math.PI * u / page.width) * page.width / 215.9;
+    const j = (y * outW + x) * 4;
+    let r, g, b;
+    if (u >= 0 && v >= 0 && u < page.width - 1 && v < page.height - 1) {
+      const i = ((v | 0) * page.width + (u | 0)) * 4;
+      r = P.data[i]; g = P.data[i + 1]; b = P.data[i + 2];
+    } else {
+      // desk: dark wood-ish with stripes
+      const t = 70 + 30 * Math.sin(x / 13 + y / 90) + 10 * Math.sin(y / 7);
+      r = t * 1.1; g = t * 0.8; b = t * 0.55;
+    }
+    let light = o.light ? 1 - o.light * (x / outW) * (0.5 + 0.5 * y / outH) : 1;
+    if (o.shadow && x + 0.4 * y < outW * o.shadow) light *= 0.55;
+    const n = (rand() - 0.5) * 2 * (o.noise || 0);
+    out.data[j] = r * light * (o.warm ? 1 : 0.97) + n;
+    out.data[j + 1] = g * light * 0.98 + n;
+    out.data[j + 2] = b * light * (o.warm ? 0.85 : 1) + n;
+    out.data[j + 3] = 255;
+  }
+  const c = document.getElementById("out"); c.width = outW; c.height = outH;
+  const ctx = c.getContext("2d");
+  ctx.putImageData(out, 0, 0);
+  if (o.blur) {
+    const c2 = document.createElement("canvas"); c2.width = outW; c2.height = outH;
+    const x2 = c2.getContext("2d"); x2.filter = `blur(${o.blur}px)`; x2.drawImage(c, 0, 0);
+    ctx.drawImage(c2, 0, 0);
+  }
+  return c;
+}
+
+async function jpegRoundTrip(canvas, q) {
+  const url = canvas.toDataURL("image/jpeg", q);
+  const img = new Image(); img.src = url; await img.decode();
+  const c = document.createElement("canvas"); c.width = canvas.width; c.height = canvas.height;
+  c.getContext("2d").drawImage(img, 0, 0);
+  return c;
+}
+
+async function runCase(cs) {
+  const rand = rng(cs.seed);
+  const test = { title: "Unit 4 Test", sections: cs.sections };
+  const testCode = 1 + Math.floor(rand() * 65000), sheetCode = 1 + Math.floor(rand() * 4000);
+  const layout = L.computeLayout(test);
+  const svg = L.renderSheetSVG(test, { testCode, sheetCode, studentName: "Alexandra Q. Student", className: "Algebra II — Period 3", date: "Nov 21, 2026" });
+  const k = 6; // px per mm for the "paper"
+  const page = await svgToCanvas(svg, k);
+  const pctx = page.getContext("2d");
+  const expected = [];
+  for (const q of layout.questions) {
+    const r = rand();
+    let ans = "";
+    if (r < 0.08) ans = "";
+    else if (r < 0.12 && q.bubbles.length > 2) {
+      const a = Math.floor(rand() * q.bubbles.length); let b = (a + 1 + Math.floor(rand() * (q.bubbles.length - 1))) % q.bubbles.length;
+      ans = [q.bubbles[a].label, q.bubbles[b].label].sort().join("");
+    } else ans = q.bubbles[Math.floor(rand() * q.bubbles.length)].label;
+    for (const b of q.bubbles) if (ans.includes(b.label)) pencil(pctx, k, b.cx, b.cy, L.BUBBLE_R * 0.95, rand, (cs.pencil || 1) * (0.85 + rand() * 0.15));
+    // erasure residue on a different bubble for some single answers
+    if (ans.length === 1 && rand() < 0.1) {
+      const other = q.bubbles.find((b) => b.label !== ans);
+      pencil(pctx, k, other.cx, other.cy, L.BUBBLE_R * 0.9, rand, 0.12);
+    }
+    expected.push(ans);
+  }
+  const outW = cs.outW, outH = cs.outH;
+  const pw = page.width, ph = page.height;
+  // base placement: fit the page into the frame, then jitter corners
+  const rot = cs.rotate || 0; // multiples of 90°
+  const fill = cs.fill || 0.85;
+  const landscape = rot % 2 === 1;
+  const fw = landscape ? ph : pw, fh = landscape ? pw : ph;
+  const s = Math.min(outW / fw, outH / fh) * fill;
+  const cx = outW / 2 + (rand() - 0.5) * outW * 0.05, cy = outH / 2 + (rand() - 0.5) * outH * 0.05;
+  let base = [[-pw / 2, -ph / 2], [pw / 2, -ph / 2], [pw / 2, ph / 2], [-pw / 2, ph / 2]];
+  const ang = rot * Math.PI / 2 + (cs.tilt || 0) * Math.PI / 180;
+  const corners = base.map(([x, y]) => {
+    const xr = x * Math.cos(ang) - y * Math.sin(ang), yr = x * Math.sin(ang) + y * Math.cos(ang);
+    const j = cs.persp || 0;
+    return [cx + xr * s + (rand() - 0.5) * j * outW, cy + yr * s + (rand() - 0.5) * j * outH];
+  });
+  if (cs.noSheet) { pctx.fillStyle = "#6b4e33"; pctx.fillRect(0, 0, page.width, page.height); }
+  let photo = photograph(page, outW, outH, corners, rand, cs);
+  if (cs.jpeg) photo = await jpegRoundTrip(photo, cs.jpeg);
+  const data = photo.getContext("2d").getImageData(0, 0, outW, outH);
+  const res = S.scan(data, { getTest: (c) => (c === testCode ? test : null) });
+  const out = { name: cs.name, status: res.status, ms: res.ms, expectFail: !!cs.expectFail };
+  if (res.status !== "ok") { out.markers = res.markers.length; return out; }
+  out.codeOk = res.testCode === testCode && res.sheetCode === sheetCode;
+  const errs = [];
+  expected.forEach((e, i) => { if (res.responses[i] !== e) errs.push(`Q${i + 1}: want "${e}" got "${res.responses[i]}" d=${res.darkness[i].join(",")} flag=${res.flags[i]}`); });
+  out.errors = errs;
+  out.n = expected.length;
+  out.flags = res.flags.filter(Boolean).length;
+  out.stats = res.stats;
+  return out;
+}
+
+const SECTIONS_A = [{ count: 5, type: "TF" }, { count: 5, type: "ASN" }, { count: 20, type: "AE" }];
+const SECTIONS_B = [{ count: 10, type: "TF" }, { count: 10, type: "ASN" }, { count: 40, type: "AD" }, { count: 30, type: "AE" }];
+const SECTIONS_C = [{ count: 12, type: "AF" }];
+
+window.CASES = [
+  { name: "clean upright 1080p", seed: 1, sections: SECTIONS_A, outW: 1920, outH: 1080, fill: 0.95 },
+  { name: "phone photo 3000px tilt+persp", seed: 2, sections: SECTIONS_B, outW: 2250, outH: 3000, tilt: 6, persp: 0.04, light: 0.35, noise: 10, blur: 1, jpeg: 0.75 },
+  { name: "upside down", seed: 3, sections: SECTIONS_A, outW: 2000, outH: 2600, rotate: 2, tilt: -4, persp: 0.03, noise: 6 },
+  { name: "sideways landscape webcam 720p", seed: 4, sections: SECTIONS_A, outW: 1280, outH: 720, rotate: 1, tilt: 3, persp: 0.02, noise: 5, blur: 0.8, jpeg: 0.8, fill: 0.95 },
+  { name: "webcam 1080p portrait-in-landscape", seed: 5, sections: SECTIONS_B, outW: 1920, outH: 1080, tilt: -8, persp: 0.03, light: 0.3, noise: 8, blur: 1, jpeg: 0.8, fill: 0.97 },
+  { name: "paper curl 2.5mm", seed: 6, sections: SECTIONS_B, outW: 2400, outH: 3200, tilt: 2, bow: 2.5, persp: 0.02, noise: 6, jpeg: 0.85 },
+  { name: "dim warm light", seed: 7, sections: SECTIONS_C, outW: 2000, outH: 2600, tilt: 10, light: 0.5, warm: true, noise: 12, blur: 1.2, jpeg: 0.7 },
+  { name: "hard shadow across sheet", seed: 9, sections: SECTIONS_B, outW: 2250, outH: 3000, tilt: -3, persp: 0.03, shadow: 0.55, noise: 8, blur: 1, jpeg: 0.75 },
+  { name: "light pencil", seed: 10, sections: SECTIONS_A, outW: 1920, outH: 1080, pencil: 0.55, tilt: 4, noise: 6, blur: 1, jpeg: 0.8, fill: 0.97 },
+  { name: "paper curl 4mm", seed: 11, sections: SECTIONS_B, outW: 2400, outH: 3200, tilt: -5, bow: 4, persp: 0.03, noise: 6, jpeg: 0.8 },
+  { name: "blurry 720p", seed: 12, sections: SECTIONS_A, outW: 1280, outH: 720, tilt: 2, blur: 1.8, noise: 8, jpeg: 0.6, fill: 0.97 },
+  { name: "no sheet in view", seed: 13, sections: SECTIONS_A, outW: 1920, outH: 1080, noSheet: true, expectFail: true },
+  { name: "small in frame (far away)", seed: 8, sections: SECTIONS_A, outW: 1920, outH: 1080, fill: 0.6, tilt: 5, noise: 5 },
+];
+
+/* Used by the end-to-end test: fill in a printed sheet and photograph it. */
+window.makePhoto = async function (svg, test, answers, cs) {
+  const rand = rng(cs.seed || 1);
+  const k = 6;
+  const page = await svgToCanvas(svg, k);
+  const pctx = page.getContext("2d");
+  for (const q of L.computeLayout(test).questions) {
+    const ans = answers[q.index] || "";
+    for (const b of q.bubbles) if (ans.includes(b.label)) pencil(pctx, k, b.cx, b.cy, L.BUBBLE_R * 0.95, rand, 0.9);
+  }
+  const outW = cs.outW || 2250, outH = cs.outH || 3000;
+  const pw = page.width, ph = page.height;
+  const s = Math.min(outW / pw, outH / ph) * 0.88;
+  const ang = ((cs.rotate || 0) * 90 + (cs.tilt || 0)) * Math.PI / 180;
+  const corners = [[-pw / 2, -ph / 2], [pw / 2, -ph / 2], [pw / 2, ph / 2], [-pw / 2, ph / 2]].map(([x, y]) => [
+    outW / 2 + (x * Math.cos(ang) - y * Math.sin(ang)) * s + (rand() - 0.5) * 0.03 * outW,
+    outH / 2 + (x * Math.sin(ang) + y * Math.cos(ang)) * s + (rand() - 0.5) * 0.03 * outH]);
+  const photo = photograph(page, outW, outH, corners, rand, cs);
+  return photo.toDataURL("image/jpeg", 0.8);
+};
+
+window.runTests = async function (only) {
+  const results = [];
+  for (const cs of window.CASES) {
+    if (only && !cs.name.includes(only)) continue;
+    results.push(await runCase(cs));
+  }
+  return results;
+};
+</script>
+</body>
+</html>
