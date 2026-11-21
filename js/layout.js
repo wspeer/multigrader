@@ -42,6 +42,9 @@
   const AREA_LEFT = 14;
   const AREA_RIGHT = 202;
   const MAX_ROWS = Math.floor((AREA_BOTTOM - AREA_TOP) / PITCH_Y); // 27
+  const VERSION_CY = 61.5; // version bubble row (only on tests with versions)
+  const VERSION_AREA_TOP = 68; // answers start lower to make room for it
+  const VERSION_LABEL_W = 19;
   const MAX_CHOICES = 6;
 
   /* Question-type presets. `choices` are single-character bubble labels. */
@@ -77,9 +80,16 @@
     return out;
   }
 
+  /* Test versions (A, B, C…). One version means the feature is off. */
+  const VERSION_LABELS = ["A", "B", "C", "D", "E", "F"];
+  function versionLabels(test) {
+    const n = Math.max(1, Math.min(VERSION_LABELS.length, parseInt(test.versionCount, 10) || 1));
+    return VERSION_LABELS.slice(0, n);
+  }
+
   /* A string that changes whenever the printed bubble layout would change. */
   function layoutSignature(test) {
-    return questionChoices(test).map((c) => c.join("")).join("|");
+    return questionChoices(test).map((c) => c.join("")).join("|") + "|v" + versionLabels(test).length;
   }
 
   /* Compute bubble positions. Returns {questions, columns, error}. */
@@ -88,7 +98,11 @@
     const n = qs.length;
     if (n === 0) return { questions: [], columns: [], error: "Add at least one question." };
     const avail = AREA_RIGHT - AREA_LEFT;
-    const minCols = Math.ceil(n / MAX_ROWS);
+    // With versions, a "Version" bubble row sits above the answers.
+    const vlabels = versionLabels(test);
+    const top = vlabels.length > 1 ? VERSION_AREA_TOP : AREA_TOP;
+    const maxRows = Math.floor((AREA_BOTTOM - top) / PITCH_Y);
+    const minCols = Math.ceil(n / maxRows);
     // Prefer columns of about 15 rows so short tests spread across the page;
     // fall back to fewer, longer columns when wide questions don't fit.
     const build = (ncols) => {
@@ -127,7 +141,7 @@
       col.x = x;
       for (let i = col.start; i < col.end; i++) {
         const row = i - col.start;
-        const cy = AREA_TOP + PITCH_Y / 2 + row * PITCH_Y;
+        const cy = top + PITCH_Y / 2 + row * PITCH_Y;
         const bubbles = qs[i].map((label, k) => ({
           label,
           cx: x + LABEL_W + PITCH_X / 2 + k * PITCH_X,
@@ -137,7 +151,18 @@
       }
       x += col.width + gap;
     });
-    return { questions, columns, error: null };
+    let versionRow = null;
+    if (vlabels.length > 1) {
+      const w = VERSION_LABEL_W + vlabels.length * PITCH_X;
+      const x0 = PAGE.w / 2 - w / 2;
+      versionRow = {
+        x: x0,
+        cy: VERSION_CY,
+        width: w,
+        bubbles: vlabels.map((label, k) => ({ label, cx: x0 + VERSION_LABEL_W + PITCH_X / 2 + k * PITCH_X, cy: VERSION_CY })),
+      };
+    }
+    return { questions, columns, versionRow, error: null };
   }
 
   /* ---------------- Sheet ID code ---------------- */
@@ -226,7 +251,7 @@
     parts.push(`<text x="${AREA_LEFT}" y="31" font-size="5" font-weight="700">${esc(opts.title || test.title || "Untitled test")}</text>`);
     if (opts.date) parts.push(`<text x="${AREA_RIGHT}" y="31" font-size="3.6" text-anchor="end" fill="#333">${esc(opts.date)}</text>`);
     if (isKey) {
-      parts.push(`<text x="${AREA_LEFT}" y="42" font-size="7" font-weight="700">ANSWER KEY</text>`);
+      parts.push(`<text x="${AREA_LEFT}" y="42" font-size="7" font-weight="700">ANSWER KEY${opts.version ? " — VERSION " + esc(opts.version) : ""}</text>`);
     } else if (opts.studentName) {
       parts.push(`<text x="${AREA_LEFT}" y="42" font-size="7" font-weight="700">${esc(opts.studentName)}</text>`);
     } else {
@@ -238,7 +263,7 @@
     // Instructions box (right of header)
     const bx = 128, by = 36, bw = AREA_RIGHT - bx, bh = 14;
     parts.push(`<rect x="${bx}" y="${by}" width="${bw}" height="${bh}" rx="1.5" fill="none" stroke="#999" stroke-width="0.25"/>`);
-    parts.push(`<text x="${bx + 3}" y="${by + 5}" font-size="3" fill="#222">Fill one bubble completely, dark.</text>`);
+    parts.push(`<text x="${bx + 3}" y="${by + 5}" font-size="3" fill="#222">Fill bubbles completely and darkly.</text>`);
     parts.push(`<text x="${bx + 3}" y="${by + 10.5}" font-size="3" fill="#222">Right:</text>`);
     parts.push(`<circle cx="${bx + 16}" cy="${by + 9.5}" r="1.9" fill="#222"/>`);
     parts.push(`<text x="${bx + 22}" y="${by + 10.5}" font-size="3" fill="#222">Wrong:</text>`);
@@ -252,6 +277,23 @@
 
     if (layout.error) {
       parts.push(`<text x="${PAGE.w / 2}" y="120" font-size="5" text-anchor="middle" fill="#b00">${esc(layout.error)}</text>`);
+    }
+
+    // Version row: the student bubbles which version of the test they have.
+    if (layout.versionRow) {
+      const v = layout.versionRow;
+      parts.push(`<rect x="${(v.x - 3).toFixed(3)}" y="${v.cy - 5}" width="${(v.width + 5).toFixed(3)}" height="10" rx="2" fill="none" stroke="#777" stroke-width="0.3"/>`);
+      parts.push(`<text x="${(v.x + VERSION_LABEL_W - 2).toFixed(3)}" y="${v.cy + 1.2}" font-size="3.4" font-weight="700" text-anchor="end">VERSION</text>`);
+      for (const b of v.bubbles) {
+        if (opts.version === b.label) {
+          parts.push(`<circle cx="${b.cx.toFixed(3)}" cy="${b.cy}" r="${BUBBLE_R - 0.1}" fill="#111"/>`);
+        } else {
+          parts.push(
+            `<circle cx="${b.cx.toFixed(3)}" cy="${b.cy}" r="${BUBBLE_R}" fill="none" stroke="#333" stroke-width="0.35"/>` +
+              `<text x="${b.cx.toFixed(3)}" y="${(b.cy + 0.95).toFixed(3)}" font-size="2.6" text-anchor="middle" fill="#8a8a8a">${esc(b.label)}</text>`
+          );
+        }
+      }
     }
 
     const fills = opts.fills || (isKey ? opts.key : null) || [];
@@ -297,6 +339,8 @@
     sectionChoices,
     questionChoices,
     layoutSignature,
+    versionLabels,
+    VERSION_LABELS,
     computeLayout,
     encodeSheetCode,
     decodeSheetCode,

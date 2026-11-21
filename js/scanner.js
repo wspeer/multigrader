@@ -460,19 +460,28 @@
     if (!test) return { ...res, status: "unknown-test", ms: Date.now() - t0 };
     const layout = L.computeLayout(test);
     if (layout.error) return { ...res, status: "layout-error", ms: Date.now() - t0 };
-    const { offsets, weak } = alignBlocks(G, H, layout);
-    const darkness = measureBubbles(G, H, layout, offsets);
-    const cls = classify(layout, darkness);
+    // The version row (if any) is read like one more question, aligned on its own.
+    const n = layout.questions.length;
+    const all = layout.versionRow
+      ? { questions: layout.questions.concat([{ ...layout.versionRow, index: n, col: "version", row: 0 }]) }
+      : layout;
+    const { offsets, weak } = alignBlocks(G, H, all);
+    const darkness = measureBubbles(G, H, all, offsets);
+    const cls = classify(all, darkness);
     weak.forEach((w, i) => { if (w) cls.flags[i] = "unclear"; });
+    const r2 = (v) => Math.round(v * 100) / 100;
     const out = {
       ...res,
       status: "ok",
       test,
-      responses: cls.responses,
-      flags: cls.flags,
+      responses: cls.responses.slice(0, n),
+      flags: cls.flags.slice(0, n),
       stats: cls.stats,
-      darkness: darkness.map((r) => r.map((v) => Math.round(v * 100) / 100)),
-      offsets: offsets.map(([a, b]) => [Math.round(a * 100) / 100, Math.round(b * 100) / 100]),
+      darkness: darkness.slice(0, n).map((r) => r.map(r2)),
+      offsets: offsets.slice(0, n).map(([a, b]) => [r2(a), r2(b)]),
+      version: layout.versionRow ? cls.responses[n] : null,
+      versionFlag: layout.versionRow ? cls.flags[n] : null,
+      versionOffset: layout.versionRow ? offsets[n].map(r2) : null,
     };
     if (opts.rectifyWidth) out.rectified = rectify(G, H, opts.rectifyWidth);
     out.ms = Date.now() - t0;

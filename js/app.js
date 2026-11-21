@@ -217,9 +217,13 @@
           <section class="card">
             <div class="card-head"><h2>Answer key</h2><span id="key-status" class="muted small"></span></div>
             <p class="muted small">Type answers into a section's box (e.g. <code>TFFTF</code> or <code>CADBE</code>), or click bubbles.
-              Shift-click (or type <code>(AC)</code>) to accept more than one answer. You can change the key after scanning; scores update automatically.</p>
+              For more than one letter, shift-click or type: <code>(AC)</code> = <strong>either</strong> A or C earns credit;
+              <code>[AC]</code> = <strong>all required</strong> (the student must bubble exactly A and C; no partial credit).
+              Click the small tag on a row to switch between the two. You can change the key after scanning; scores update automatically.</p>
             <div id="key-grid"></div>
           </section>
+
+          <section class="card" id="versions-card"></section>
         </div>
         <aside class="build-preview">
           <div class="card sticky">
@@ -239,6 +243,7 @@
     }));
     renderFormat(t);
     renderKey(t);
+    renderVersions(t);
     updatePreview(t);
   }
 
@@ -272,10 +277,23 @@
       </div>`}
       <p id="format-summary" class="muted small"></p>`;
 
-    const fmtChanged = () => { saveSoon(t); updateRanges(t); renderKey(t); updatePreview(t); };
+    const fmtChanged = () => { saveSoon(t); updateRanges(t); renderKey(t); renderVersions(t); updatePreview(t); };
     $$(".sec-row").forEach((row) => {
       const s = t.sections[+row.dataset.i];
-      $(".sec-count", row).onchange = (e) => { s.count = Math.max(1, Math.min(L.MAX_ROWS * 4, parseInt(e.target.value, 10) || 1)); e.target.value = s.count; fmtChanged(); };
+      // Apply the count while typing (debounced), so leaving the field doesn't
+      // redraw the key grid under the user's next click.
+      let countTimer;
+      const applyCount = (raw, fix) => {
+        const v = parseInt(raw, 10);
+        if (!fix && !(v >= 1)) return;
+        const n = Math.max(1, Math.min(L.MAX_ROWS * 4, v || 1));
+        if (fix) $(".sec-count", row).value = n;
+        if (n === +s.count) return;
+        s.count = n;
+        fmtChanged();
+      };
+      $(".sec-count", row).oninput = (e) => { clearTimeout(countTimer); countTimer = setTimeout(() => applyCount(e.target.value, false), 350); };
+      $(".sec-count", row).onchange = (e) => { clearTimeout(countTimer); applyCount(e.target.value, true); };
       $(".sec-type", row).onchange = (e) => { s.type = e.target.value; $(".sec-custom-wrap", row).classList.toggle("hidden", s.type !== "custom"); if (s.type === "custom" && !s.custom) s.custom = "ABCD"; $(".sec-custom", row).value = s.custom || ""; fmtChanged(); };
       $(".sec-custom", row).oninput = (e) => { s.custom = e.target.value.toUpperCase(); fmtChanged(); };
       $(".sec-points", row).oninput = (e) => { s.points = e.target.value === "" ? 1 : parseFloat(e.target.value); saveSoon(t); updateRanges(t); renderKeyStatus(t); };
@@ -294,7 +312,7 @@
       const n = St.scansFor(t).length;
       if (!confirm(`Sheets you've already printed for this test will no longer scan once the format changes — you'll need to reprint them.${n ? `\n\nThe ${n} sheet(s) already scanned are kept, but their answers may no longer line up with the new questions.` : ""}\n\nContinue?`)) return;
       St.resetFormat(t);
-      renderFormat(t); updatePreview(t);
+      renderFormat(t); renderVersions(t); updatePreview(t);
     };
     updateRanges(t);
   }
@@ -317,8 +335,8 @@
   function keyToQuick(key, n) {
     let out = "";
     for (let i = 0; i < n; i++) {
-      const k = key[i] || "";
-      out += k.length > 1 ? `(${k})` : k || "-";
+      const { letters, all } = St.keyInfo(key[i]);
+      out += letters.length > 1 ? (all ? `[${letters}]` : `(${letters})`) : letters || "-";
       if (i % 5 === 4 && i < n - 1) out += " ";
     }
     return out.replace(/[\s-]+$/, "");
@@ -330,10 +348,11 @@
     let i = 0;
     while (i < src.length && out.length < n) {
       const c = src[i];
-      if (c === "(") {
-        const j = src.indexOf(")", i);
-        const grp = src.slice(i + 1, j < 0 ? src.length : j).split("").filter((x) => choices.includes(x));
-        out.push([...new Set(grp)].sort().join(""));
+      if (c === "(" || c === "[") {
+        const close = c === "(" ? ")" : "]";
+        const j = src.indexOf(close, i);
+        const grp = src.slice(i + 1, j < 0 ? src.length : j).split("").filter((x) => choices.includes(x)).join("");
+        out.push(St.makeKey(grp, c === "["));
         i = j < 0 ? src.length : j + 1;
       } else if (c === "-" || c === "?" || c === "_" || c === ".") { out.push(""); i++; }
       else if (choices.includes(c)) { out.push(c); i++; }
@@ -357,51 +376,156 @@
             <input class="key-quick" spellcheck="false" autocomplete="off" placeholder="Type ${r.n} answers, e.g. ${ch.slice(0, 3).join("")}…" value="${esc(keyToQuick(s.key, r.n))}" />
           </div>
           <div class="key-rows">
-            ${Array.from({ length: r.n }, (_, i) => keyRow(r.start + i + 1, i, ch, s.key[i] || "")).join("")}
+            ${Array.from({ length: r.n }, (_, i) => keyRow(r.start + i + 1, i, ch)).join("")}
           </div>
         </div>`;
     }).join("");
     $$(".key-sec").forEach((sec) => {
       const s = t.sections[+sec.dataset.si];
+      $$(".key-row", sec).forEach((row, i) => paintKeyRow(row, s.key[i]));
       const ch = L.sectionChoices(s);
       const n = Math.max(0, parseInt(s.count, 10) || 0);
       $(".key-quick", sec).oninput = (e) => {
         const k = quickToKey(e.target.value, ch, n);
         s.key = Array.from({ length: n }, (_, i) => k[i] || "");
         $$(".key-row", sec).forEach((row, i) => paintKeyRow(row, s.key[i]));
-        saveSoon(t); renderKeyStatus(t);
+        saveSoon(t); renderKeyStatus(t); renderVersions(t);
       };
       sec.onclick = (e) => {
+        const mode = e.target.closest(".kmode");
         const b = e.target.closest(".kb");
-        if (!b) return;
-        const row = b.closest(".key-row");
+        if (!b && !mode) return;
+        const row = (b || mode).closest(".key-row");
         const i = +row.dataset.local;
-        const c = b.dataset.c;
-        let k = s.key[i] || "";
-        if (e.shiftKey || e.metaKey || e.ctrlKey) k = k.includes(c) ? k.replace(c, "") : [...k, c].sort().join("");
-        else k = k === c ? "" : c;
+        const { letters, all } = St.keyInfo(s.key[i]);
+        let k;
+        if (mode) k = St.makeKey(letters, !all);
+        else {
+          const c = b.dataset.c;
+          if (e.shiftKey || e.metaKey || e.ctrlKey) k = St.makeKey(letters.includes(c) ? letters.replace(c, "") : letters + c, all);
+          else k = letters === c ? "" : c;
+        }
         s.key[i] = k;
         paintKeyRow(row, k);
         $(".key-quick", sec).value = keyToQuick(s.key, n);
-        saveSoon(t); renderKeyStatus(t);
+        saveSoon(t); renderKeyStatus(t); renderVersions(t);
       };
     });
     renderKeyStatus(t);
   }
 
-  function keyRow(num, local, ch, k) {
-    return `<div class="key-row ${k ? "" : "unset"}" data-local="${local}"><span class="qn">${num}</span>${ch.map((c) => `<button type="button" class="kb ${k.includes(c) ? "on" : ""}" data-c="${esc(c)}">${esc(c)}</button>`).join("")}</div>`;
+  function keyRow(num, local, ch) {
+    return `<div class="key-row" data-local="${local}"><span class="qn">${num}</span>${ch.map((c) => `<button type="button" class="kb" data-c="${esc(c)}">${esc(c)}</button>`).join("")}<button type="button" class="kmode" title="Click to switch: either answer earns credit, or all of them are required"></button></div>`;
   }
   function paintKeyRow(row, k) {
-    k = k || "";
-    row.classList.toggle("unset", !k);
-    $$(".kb", row).forEach((b) => b.classList.toggle("on", k.includes(b.dataset.c)));
+    const { letters, all } = St.keyInfo(k);
+    row.classList.toggle("unset", !letters);
+    row.classList.toggle("multi", letters.length > 1);
+    row.classList.toggle("all", all);
+    $$(".kb", row).forEach((b) => b.classList.toggle("on", letters.includes(b.dataset.c)));
+    $(".kmode", row).textContent = all ? "all required" : "either";
   }
   function renderKeyStatus(t) {
     const fk = St.flatKey(t);
     const done = fk.filter(Boolean).length;
     const el = $("#key-status");
     if (el) el.innerHTML = done === fk.length ? `<span class="good-txt">All ${fk.length} answers entered ✓</span>` : `${done} of ${fk.length} answers entered`;
+  }
+
+  /* --- versions --- */
+
+  function versionKeyText(t, v) {
+    const vk = St.versionKey(t, v);
+    return sectionRanges(t).filter((r) => r.n).map((r) =>
+      `<span class="vk"><span class="muted">${r.start + 1}${r.n > 1 ? "–" + (r.end + 1) : ""}</span> <code>${esc(keyToQuick(vk.slice(r.start, r.end + 1), r.n) || "—")}</code></span>`
+    ).join(" ");
+  }
+
+  function shuffled(n) {
+    const a = Array.from({ length: n }, (_, i) => i);
+    for (let tries = 0; tries < 5; tries++) {
+      for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+      if (n < 2 || a.some((x, i) => x !== i)) break;
+    }
+    return a;
+  }
+
+  function renderVersions(t) {
+    const el = $("#versions-card");
+    if (!el) return;
+    const labels = L.versionLabels(t);
+    const locked = formatLocked(t);
+    const ranges = sectionRanges(t);
+    el.innerHTML = `
+      <h2>Versions</h2>
+      <div class="form-row">
+        <label>Number of versions
+          <select id="v-count" ${locked ? "disabled" : ""}>${L.VERSION_LABELS.map((l, i) => `<option value="${i + 1}" ${labels.length === i + 1 ? "selected" : ""}>${i === 0 ? "1 (no versions)" : `${i + 1} (A–${l})`}</option>`).join("")}</select>
+        </label>
+      </div>
+      ${locked ? `<p class="muted small">The number of versions changes the printed sheet, so it's locked once sheets are printed (see Question format).</p>` : ""}
+      ${labels.length < 2 ? `<p class="muted small">Use versions to give students the same questions in a different order. Each sheet gets a VERSION row for students to bubble, each sheet is graded with its version's key, and results and item analysis use Version A's question numbers.</p>` : `
+      <p class="muted small">Version A uses the order above. For each other version, list the <strong>Version A question numbers in the order they appear on that version</strong>, or click Shuffle.
+        Questions can move only within their own section, so every version uses the same answer sheet. Students bubble their version at the top of the sheet; if they forget, the sheet is graded as the version that fits best and flagged for you.</p>
+      ${labels.slice(1).map((v) => `
+        <div class="ver-block" data-v="${v}">
+          <div class="ver-head"><strong>Version ${v}</strong>
+            <button class="btn small" data-shuffle>Shuffle</button>
+            <button class="btn small ghost" data-same>Same as A</button></div>
+          ${t.sections.map((s, si) => {
+            const r = ranges[si];
+            if (!r.n) return "";
+            const o = St.sectionOrder(t, v, s);
+            return `<div class="ver-sec" data-si="${si}">
+              <span class="ver-range">${v} ${r.start + 1}${r.n > 1 ? "–" + (r.end + 1) : ""}</span>
+              <input class="ver-order" value="${o.map((x) => x + r.start + 1).join(" ")}" spellcheck="false" autocomplete="off" inputmode="numeric" />
+              <span class="ver-msg small"></span></div>`;
+          }).join("")}
+          <div class="ver-key small"><span class="muted">Version ${v} key:</span> <span class="vk-list">${versionKeyText(t, v)}</span></div>
+        </div>`).join("")}`}`;
+
+    const vc = $("#v-count");
+    vc.onchange = () => {
+      t.versionCount = +vc.value;
+      saveSoon(t); updateRanges(t); renderVersions(t); updatePreview(t);
+    };
+    $$(".ver-block", el).forEach((blk) => {
+      const v = blk.dataset.v;
+      $$(".ver-sec", blk).forEach((row) => {
+        const sec = t.sections[+row.dataset.si];
+        const r = ranges[+row.dataset.si];
+        const inp = $(".ver-order", row), msg = $(".ver-msg", row);
+        inp.oninput = () => {
+          const nums = (inp.value.match(/\d+/g) || []).map(Number);
+          const want = Array.from({ length: r.n }, (_, i) => r.start + 1 + i);
+          const missing = want.filter((x) => !nums.includes(x));
+          const dup = [...new Set(nums.filter((x, i) => nums.indexOf(x) !== i))];
+          const bad = nums.filter((x) => x < r.start + 1 || x > r.end + 1);
+          if (!missing.length && !dup.length && !bad.length && nums.length === r.n) {
+            St.setSectionOrder(t, v, sec, nums.map((x) => x - r.start - 1));
+            msg.innerHTML = `<span class="good-txt">✓</span>`;
+            inp.classList.remove("invalid");
+            $(".vk-list", blk).innerHTML = versionKeyText(t, v);
+            saveSoon(t);
+          } else {
+            const parts = [];
+            if (bad.length) parts.push(`not in this section: ${bad.join(", ")}`);
+            if (dup.length) parts.push(`repeated: ${dup.join(", ")}`);
+            if (missing.length) parts.push(`missing: ${missing.slice(0, 8).join(", ")}${missing.length > 8 ? "…" : ""}`);
+            msg.innerHTML = `<span class="bad-txt">${esc(parts.join("; "))}</span>`;
+            inp.classList.add("invalid");
+          }
+        };
+      });
+      $("[data-shuffle]", blk).onclick = () => {
+        t.sections.forEach((sec) => St.setSectionOrder(t, v, sec, shuffled(Math.max(0, parseInt(sec.count, 10) || 0))));
+        saveSoon(t); renderVersions(t);
+      };
+      $("[data-same]", blk).onclick = () => {
+        if (t.versionOrders) delete t.versionOrders[v];
+        saveSoon(t); renderVersions(t);
+      };
+    });
   }
 
   let previewTimer;
@@ -448,7 +572,7 @@
               <label>Extra blank sheets <span class="muted small">(student writes their name)</span>
                 <input id="p-blanks" type="number" min="0" max="60" value="${sel.blanks}" /></label>
             </div>
-            <label class="check"><input type="checkbox" id="p-key" ${sel.key ? "checked" : ""}/> Also print an answer-key sheet <span class="muted small">(scan it to double-check your key — it's never recorded as a student)</span></label>
+            <label class="check"><input type="checkbox" id="p-key" ${sel.key ? "checked" : ""}/> Also print ${L.versionLabels(t).length > 1 ? "an answer-key sheet for each version" : "an answer-key sheet"} <span class="muted small">(scan it to double-check your key — it's never recorded as a student)</span></label>
             <div class="print-go">
               <button class="btn primary big" id="p-go" ${lay.error ? "disabled" : ""}>Print</button>
               <span id="p-count" class="muted"></span>
@@ -478,8 +602,9 @@
       }
       return list;
     };
+    const vlabels = L.versionLabels(t);
     const update = () => {
-      const n = jobs().length + sel.blanks + (sel.key ? 1 : 0);
+      const n = jobs().length + sel.blanks + (sel.key ? vlabels.length : 0);
       $("#p-count").textContent = `${n} sheet${n === 1 ? "" : "s"}`;
       $("#p-go").textContent = `Print ${n} sheet${n === 1 ? "" : "s"}`;
       $("#p-go").disabled = !!lay.error || n === 0;
@@ -506,7 +631,11 @@
         const sh = St.newBlankSheet(t, blankCls && blankCls.id);
         pages.push(L.renderSheetSVG(t, { testCode: t.code, sheetCode: sh.code, className: blankCls ? blankCls.name : "", date }));
       }
-      if (sel.key) pages.push(L.renderSheetSVG(t, { testCode: t.code, sheetCode: L.SHEET_KEY, key: St.flatKey(t), date }));
+      if (sel.key) {
+        for (const v of vlabels) {
+          pages.push(L.renderSheetSVG(t, { testCode: t.code, sheetCode: L.SHEET_KEY, key: St.versionKey(t, v), version: vlabels.length > 1 ? v : null, date }));
+        }
+      }
       t.updatedAt = St.now();
       St.save();
       printPages(pages);
@@ -528,36 +657,42 @@
 
   function viewResults(t) {
     const classes = t.classIds.map(St.getClass).filter(Boolean);
+    const vlabels = L.versionLabels(t);
+    const hasV = vlabels.length > 1;
     const filter = ui(t).filter || "";
+    const vfilter = hasV ? ui(t).vfilter || "" : "";
     const scans = St.scansFor(t);
     const roster = testRoster(t);
     const rows = scans.map((scan) => {
       const f = scan.studentId ? St.findStudent(scan.studentId) : null;
-      return { scan, student: f && f.student, cls: f && f.cls, g: St.grade(t, scan) };
+      const g = St.grade(t, scan);
+      return { scan, student: f && f.student, cls: f && f.cls, g, nflag: St.flagCount(scan, g) };
     });
-    const inFilter = (r) => !filter || (r.cls && r.cls.id === filter);
+    const inFilter = (r) => (!filter || (r.cls && r.cls.id === filter)) && (!vfilter || r.g.version === vfilter);
     const named = rows.filter((r) => r.student && inFilter(r)).sort((a, b) => (a.student.last + a.student.first).localeCompare(b.student.last + b.student.first));
-    const unassigned = rows.filter((r) => !r.student && (!filter || !r.scan.studentId));
+    const unassigned = rows.filter((r) => !r.student && (!filter || !r.scan.studentId) && (!vfilter || r.g.version === vfilter));
     const scannedIds = new Set(rows.filter((r) => r.student).map((r) => r.student.id));
-    const missing = roster.filter((x) => !scannedIds.has(x.student.id) && (!filter || x.cls.id === filter));
+    const missing = vfilter ? [] : roster.filter((x) => !scannedIds.has(x.student.id) && (!filter || x.cls.id === filter));
     const graded = named.concat(unassigned);
     const pcts = graded.map((r) => r.g.pct).sort((a, b) => a - b);
     const mean = pcts.length ? pcts.reduce((a, b) => a + b, 0) / pcts.length : NaN;
     const median = pcts.length ? (pcts[Math.floor((pcts.length - 1) / 2)] + pcts[Math.ceil((pcts.length - 1) / 2)]) / 2 : NaN;
     const fk = St.flatKey(t);
     const qc = L.questionChoices(t);
-    const nflag = (r) => r.scan.flags.filter((f, i) => f && (r.scan.overrides || {})[i] == null).length;
+    const vcol = (r) => hasV ? `<td>${r.g.version}${r.g.versionInferred ? `<span class="warn-txt" title="Version not bubbled clearly; graded as the best-matching version">?</span>` : ""}</td>` : "";
+    const ncols = 6 + (classes.length > 1 ? 1 : 0) + (hasV ? 1 : 0);
 
     main.innerHTML = `
       ${testHeader(t, "results")}
       <div class="results-top">
         ${classes.length > 1 ? `<label>Class <select id="r-filter"><option value="">All classes</option>${classes.map((c) => `<option value="${c.id}" ${filter === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>` : ""}
+        ${hasV ? `<label>Version <select id="r-vfilter"><option value="">All versions</option>${vlabels.map((v) => `<option value="${v}" ${vfilter === v ? "selected" : ""}>Version ${v}</option>`).join("")}</select></label>` : ""}
         <div class="spacer"></div>
         <button class="btn" id="r-csv" ${graded.length ? "" : "disabled"}>Export CSV</button>
       </div>
       ${fk.some((k) => !k) ? `<div class="notice">The answer key is incomplete (${fk.filter(Boolean).length}/${fk.length}). Unkeyed questions aren't scored. <a href="#/test/${t.id}/build">Finish the key</a></div>` : ""}
       <div class="stats">
-        <div class="stat"><div class="stat-n">${graded.length}${roster.length ? `<span class="muted">/${missing.length + named.length}</span>` : ""}</div><div class="stat-l">scanned</div></div>
+        <div class="stat"><div class="stat-n">${graded.length}${roster.length && !vfilter ? `<span class="muted">/${missing.length + named.length}</span>` : ""}</div><div class="stat-l">scanned</div></div>
         <div class="stat"><div class="stat-n">${pct(mean)}</div><div class="stat-l">mean</div></div>
         <div class="stat"><div class="stat-n">${pct(median)}</div><div class="stat-l">median</div></div>
         <div class="stat"><div class="stat-n">${pcts.length ? pct(pcts[pcts.length - 1]) : "–"}</div><div class="stat-l">high</div></div>
@@ -568,49 +703,56 @@
         <h2>Students</h2>
         ${graded.length === 0 && missing.length === 0 ? `<p class="muted">Nothing scanned yet. Go to <a href="#/scan">Scan</a>.</p>` : `
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>Student</th>${classes.length > 1 ? "<th>Class</th>" : ""}<th class="num">Score</th><th class="num">%</th><th>Check</th><th>Scanned</th><th></th></tr></thead>
+          <thead><tr><th>Student</th>${classes.length > 1 ? "<th>Class</th>" : ""}${hasV ? "<th>Ver.</th>" : ""}<th class="num">Score</th><th class="num">%</th><th>Check</th><th>Scanned</th><th></th></tr></thead>
           <tbody>
             ${named.map((r) => `<tr>
-              <td>${esc(St.studentName(r.student))}</td>${classes.length > 1 ? `<td>${esc(r.cls.name)}</td>` : ""}
+              <td>${esc(St.studentName(r.student))}</td>${classes.length > 1 ? `<td>${esc(r.cls.name)}</td>` : ""}${vcol(r)}
               <td class="num">${fmtPts(r.g.score)}/${fmtPts(r.g.possible)}</td><td class="num"><strong>${pct(r.g.pct)}</strong></td>
-              <td>${nflag(r) ? `<span class="pill warn">${nflag(r)} to check</span>` : ""}${Object.keys(r.scan.overrides || {}).length ? `<span class="pill">edited</span>` : ""}</td>
+              <td>${r.nflag ? `<span class="pill warn">${r.nflag} to check</span>` : ""}${Object.keys(r.scan.overrides || {}).length || r.scan.versionOverride ? `<span class="pill">edited</span>` : ""}</td>
               <td class="muted small">${fmtTime(r.scan.scannedAt)}</td>
               <td><button class="btn small" data-review="${r.scan.id}">Review</button></td></tr>`).join("")}
             ${unassigned.map((r) => `<tr class="unassigned">
-              <td><em>Blank sheet #${r.scan.sheetCode}</em> → <select data-assign="${r.scan.id}"><option value="">who is this?</option>${roster.map((x) => `<option value="${x.student.id}">${esc(St.studentName(x.student))}</option>`).join("")}</select></td>${classes.length > 1 ? "<td></td>" : ""}
+              <td><em>Blank sheet #${r.scan.sheetCode}</em> → <select data-assign="${r.scan.id}"><option value="">who is this?</option>${roster.map((x) => `<option value="${x.student.id}">${esc(St.studentName(x.student))}</option>`).join("")}</select></td>${classes.length > 1 ? "<td></td>" : ""}${vcol(r)}
               <td class="num">${fmtPts(r.g.score)}/${fmtPts(r.g.possible)}</td><td class="num"><strong>${pct(r.g.pct)}</strong></td>
-              <td>${nflag(r) ? `<span class="pill warn">${nflag(r)} to check</span>` : ""}</td>
+              <td>${r.nflag ? `<span class="pill warn">${r.nflag} to check</span>` : ""}</td>
               <td class="muted small">${fmtTime(r.scan.scannedAt)}</td>
               <td><button class="btn small" data-review="${r.scan.id}">Review</button></td></tr>`).join("")}
-            ${missing.map((x) => `<tr class="missing"><td>${esc(St.studentName(x.student))}</td>${classes.length > 1 ? `<td>${esc(x.cls.name)}</td>` : ""}<td colspan="5" class="muted">not scanned</td></tr>`).join("")}
+            ${missing.map((x) => `<tr class="missing"><td>${esc(St.studentName(x.student))}</td>${classes.length > 1 ? `<td>${esc(x.cls.name)}</td>` : ""}<td colspan="${ncols - 1 - (classes.length > 1 ? 1 : 0)}" class="muted">not scanned</td></tr>`).join("")}
           </tbody>
         </table></div>`}
       </section>
 
       ${graded.length ? `<section class="card">
         <h2>Item analysis</h2>
-        <p class="muted small">How often each answer was chosen. The correct answer is highlighted; questions most students missed are flagged.</p>
+        <p class="muted small">How often each answer was chosen; correct answers are highlighted, and questions most students missed are shaded.
+          ${hasV ? "Questions are numbered as on <strong>Version A</strong>; answers from every version are matched to the same question." : ""}
+          For “all required” questions, each bar counts how many students bubbled that letter.</p>
         <div class="table-wrap"><table class="table items">
           <thead><tr><th>Q</th><th>Key</th><th class="num">Correct</th><th>Responses</th></tr></thead>
           <tbody>${qc.map((ch, i) => {
+            const ki = St.keyInfo(fk[i]);
             const counts = {};
             let blank = 0, multi = 0, correct = 0;
             for (const r of graded) {
               const it = r.g.items[i];
               if (!it) continue;
-              if (!it.resp) blank++; else if (it.resp.length > 1) multi++; else counts[it.resp] = (counts[it.resp] || 0) + 1;
+              if (!it.resp) blank++;
+              else if (it.resp.length > 1 && !ki.all) multi++;
+              else for (const c of it.resp) counts[c] = (counts[c] || 0) + 1;
               if (it.correct) correct++;
             }
             const p = fk[i] ? (100 * correct) / graded.length : NaN;
             const bar = (label, n, isKey) => `<span class="resp ${isKey ? "key" : ""}" title="${n} chose ${label}"><b>${esc(label)}</b> ${n}<i style="width:${(100 * n) / graded.length}%"></i></span>`;
-            return `<tr class="${fk[i] && p < 50 ? "hard" : ""}"><td>${i + 1}</td><td>${esc(fk[i] || "—")}</td><td class="num">${pct(p)}</td>
-              <td class="resp-cell">${ch.map((c) => bar(c, counts[c] || 0, (fk[i] || "").includes(c))).join("")}${blank ? `<span class="resp other">blank ${blank}</span>` : ""}${multi ? `<span class="resp other">multiple ${multi}</span>` : ""}</td></tr>`;
+            return `<tr class="${fk[i] && p < 50 ? "hard" : ""}"><td>${i + 1}</td><td>${esc(St.keyText(fk[i]) || "—")}${ki.all ? ` <span class="pill">all</span>` : ""}</td><td class="num">${pct(p)}</td>
+              <td class="resp-cell">${ch.map((c) => bar(c, counts[c] || 0, ki.letters.includes(c))).join("")}${blank ? `<span class="resp other">blank ${blank}</span>` : ""}${multi ? `<span class="resp other">multiple ${multi}</span>` : ""}</td></tr>`;
           }).join("")}</tbody>
         </table></div>
       </section>` : ""}`;
 
     const rf = $("#r-filter");
     if (rf) rf.onchange = () => { ui(t).filter = rf.value; viewResults(t); };
+    const vf = $("#r-vfilter");
+    if (vf) vf.onchange = () => { ui(t).vfilter = vf.value; viewResults(t); };
     $$("[data-review]").forEach((b) => (b.onclick = () => openReview(b.dataset.review, () => viewResults(t))));
     $$("[data-assign]").forEach((s) => (s.onchange = () => {
       const scan = St.db.scans.find((x) => x.id === s.dataset.assign);
@@ -621,13 +763,15 @@
       St.save(); viewResults(t);
     }));
     $("#r-csv").onclick = () => {
-      const head = ["Last", "First", "Class", "Score", "Possible", "Percent", ...qc.map((_, i) => "Q" + (i + 1))];
+      const quick = (k) => { const { letters, all } = St.keyInfo(k); return letters.length > 1 ? (all ? `[${letters}]` : `(${letters})`) : letters; };
+      const head = ["Last", "First", "Class", ...(hasV ? ["Version"] : []), "Score", "Possible", "Percent", ...qc.map((_, i) => "Q" + (i + 1))];
       const lines = [head];
       for (const r of graded) {
         lines.push([r.student ? r.student.last : "", r.student ? r.student.first : `Blank sheet #${r.scan.sheetCode}`, r.cls ? r.cls.name : "",
-          fmtPts(r.g.score), fmtPts(r.g.possible), (Math.round(r.g.pct * 10) / 10).toString(), ...r.g.items.map((it) => it.resp)]);
+          ...(hasV ? [r.g.version + (r.g.versionInferred ? "?" : "")] : []),
+          fmtPts(r.g.score), fmtPts(r.g.possible), (Math.round(r.g.pct * 10) / 10).toString(), ...r.g.items.map((it) => (it ? it.resp : ""))]);
       }
-      lines.push(["", "KEY", "", "", "", "", ...fk]);
+      lines.push(["", "KEY", "", ...(hasV ? ["A"] : []), "", "", "", ...fk.map(quick)]);
       const csv = lines.map((l) => l.map((v) => /[",\n]/.test(v) ? `"${String(v).replace(/"/g, '""')}"` : v).join(",")).join("\n");
       download(`${(t.title || "test").replace(/[^\w\- ]+/g, "").trim() || "test"} results.csv`, csv, "text/csv");
     };
@@ -654,24 +798,35 @@
     if (m._url) URL.revokeObjectURL(m._url);
     m._url = blob ? URL.createObjectURL(blob) : null;
     const lay = L.computeLayout(t);
+    const vlabels = L.versionLabels(t);
+    const hasV = vlabels.length > 1;
     const done = () => { closeModal(); if (onDone) onDone(); };
+    const FLAG_TEXT = { multiple: "two bubbles filled", erasure: "possible erasure", faint: "very light mark", unclear: "hard to read" };
 
     const render = () => {
       const g = St.grade(t, scan);
       const f = scan.studentId ? St.findStudent(scan.studentId) : null;
       const ov = scan.overrides || (scan.overrides = {});
-      const overlay = lay.questions.map((q) => {
-        const it = g.items[q.index] || { resp: "", key: "" };
+      let overlay = lay.questions.map((q) => {
+        const it = g.byPos[q.index] || { resp: "", key: "" };
+        const ki = St.keyInfo(it.key);
         const [dx, dy] = (scan.offsets && scan.offsets[q.index]) || [0, 0];
-        const flag = scan.flags[q.index] && ov[q.index] == null;
+        const flag = St.shownFlag(scan, g, q.index);
         let s = flag ? `<rect x="${q.x + dx - 1}" y="${q.cy + dy - 3.3}" width="${q.bubbles[q.bubbles.length - 1].cx - q.x + 4.5}" height="6.6" rx="1.2" fill="#f5a623" opacity="0.28"/>` : "";
         for (const b of q.bubbles) {
-          const picked = it.resp.includes(b.label), isKey = (it.key || "").includes(b.label);
+          const picked = it.resp.includes(b.label), isKey = ki.letters.includes(b.label);
           if (picked) s += `<circle cx="${b.cx + dx}" cy="${b.cy + dy}" r="${L.BUBBLE_R + 0.7}" fill="none" stroke="${it.correct ? "#1a9b54" : it.key ? "#d93025" : "#2457c5"}" stroke-width="0.7"/>`;
           else if (isKey && !it.correct) s += `<circle cx="${b.cx + dx}" cy="${b.cy + dy}" r="${L.BUBBLE_R + 0.7}" fill="none" stroke="#1a9b54" stroke-width="0.5" stroke-dasharray="1 0.8"/>`;
         }
         return `<g data-q="${q.index}">${s}</g>`;
       }).join("");
+      if (lay.versionRow) {
+        const v = lay.versionRow;
+        const [dx, dy] = scan.versionOffset || [0, 0];
+        if (g.versionInferred) overlay += `<rect x="${v.x + dx - 2}" y="${v.cy + dy - 4}" width="${v.width + 3}" height="8" rx="1.5" fill="#f5a623" opacity="0.3"/>`;
+        for (const b of v.bubbles) if (b.label === g.version) overlay += `<circle cx="${b.cx + dx}" cy="${b.cy + dy}" r="${L.BUBBLE_R + 0.7}" fill="none" stroke="#2457c5" stroke-width="0.7" ${g.versionInferred ? 'stroke-dasharray="1 0.8"' : ""}/>`;
+      }
+      const readV = scan.version || "";
       m.innerHTML = `
         <div class="modal-box review">
           <div class="modal-head">
@@ -682,6 +837,13 @@
             <div class="score-big">${fmtPts(g.score)}/${fmtPts(g.possible)} <span>${pct(g.pct)}</span></div>
             <button class="icon-btn" id="m-close" title="Close">✕</button>
           </div>
+          ${hasV ? `<div class="ver-bar ${g.versionInferred ? "flag" : ""}">
+            <strong>Version</strong>
+            <span class="ov-btns">${vlabels.map((v) => `<button class="ob ${g.version === v ? "on" : ""}" data-ver="${v}">${v}</button>`).join("")}</span>
+            <span class="small">${scan.versionOverride ? `set by you (sheet read “${esc(readV || "blank")}”) <a href="#" id="ver-undo">undo</a>`
+              : g.versionInferred ? `<span class="warn-txt">${readV ? `two versions bubbled (${esc(readV)})` : "not bubbled"}; graded as ${g.version}, the best match. Click to change.</span>`
+              : `<span class="muted">as bubbled</span>`}</span>
+          </div>` : ""}
           <div class="review-body">
             <div class="review-img">
               ${m._url ? `<div class="img-wrap"><img src="${m._url}" alt="Scanned sheet"/><svg viewBox="0 0 ${L.PAGE.w} ${L.PAGE.h}" class="img-overlay">${overlay}</svg></div>`
@@ -689,17 +851,19 @@
               <p class="legend small"><span class="lg good"></span>correct <span class="lg bad"></span>wrong <span class="lg key"></span>correct answer <span class="lg flag"></span>check this</p>
             </div>
             <div class="review-list">
-              <p class="muted small">Click a letter to correct what the scanner read. Highlighted rows need a look.</p>
+              <p class="muted small">Click letters to correct what the scanner read (shift-click to mark more than one). Highlighted rows need a look.${hasV && g.version !== "A" ? ` Numbers are as printed on Version ${g.version}; “= A12” shows the matching Version A question.` : ""}</p>
               ${lay.questions.map((q) => {
-                const i = q.index, it = g.items[i] || {};
-                const flag = scan.flags[i];
+                const i = q.index, it = g.byPos[i] || {};
+                const ki = St.keyInfo(it.key);
+                const flag = St.shownFlag(scan, g, i);
                 const edited = ov[i] != null;
-                return `<div class="ov-row ${flag && !edited ? "flag" : ""}" data-i="${i}">
+                return `<div class="ov-row ${flag ? "flag" : ""}" data-i="${i}">
                   <span class="qn">${i + 1}</span>
-                  <span class="ov-btns">${["", ...q.bubbles.map((b) => b.label)].map((c) => `<button class="ob ${it.resp === c ? "on" : ""} ${c && (it.key || "").includes(c) ? "is-key" : ""}" data-c="${esc(c)}" title="${c ? c : "blank"}">${c || "–"}</button>`).join("")}
-                  ${it.resp && it.resp.length > 1 ? `<button class="ob on" disabled>${esc(it.resp)}</button>` : ""}</span>
+                  <span class="ov-btns"><button class="ob ${!it.resp ? "on" : ""}" data-c="" title="blank">–</button>${q.bubbles.map((b) => `<button class="ob ${it.resp && it.resp.includes(b.label) ? "on" : ""} ${ki.letters.includes(b.label) ? "is-key" : ""}" data-c="${esc(b.label)}">${esc(b.label)}</button>`).join("")}</span>
                   <span class="ov-mark">${it.correct === true ? "✓" : it.correct === false ? "✗" : ""}</span>
-                  <span class="ov-note small">${edited ? `edited (read “${esc(scan.responses[i] || "blank")}”) <a href="#" data-undo="${i}">undo</a>` : flag ? esc({ multiple: "two bubbles filled", erasure: "possible erasure", faint: "very light mark", unclear: "hard to read" }[flag] || flag) : ""}</span>
+                  ${hasV && g.version !== "A" ? `<span class="muted small">= A${it.q + 1}</span>` : ""}
+                  ${ki.letters.length > 1 ? `<span class="muted small">key ${esc(St.keyText(it.key))}${ki.all ? " (all)" : ""}</span>` : ""}
+                  <span class="ov-note small">${edited ? `edited (read “${esc(scan.responses[i] || "blank")}”) <a href="#" data-undo="${i}">undo</a>` : flag ? esc(FLAG_TEXT[flag] || flag) : ""}</span>
                 </div>`;
               }).join("")}
             </div>
@@ -710,18 +874,30 @@
             <button class="btn primary" id="m-done">Done</button>
           </div>
         </div>`;
+      const touch = () => { scan.updatedAt = St.now(); St.save(); render(); };
       $("#m-close").onclick = done;
       $("#m-done").onclick = done;
       $("#m-del").onclick = () => { if (confirm("Delete this scanned sheet?")) { St.deleteScan(scan); done(); } };
+      $$("[data-ver]", m).forEach((b) => (b.onclick = () => {
+        scan.versionOverride = b.dataset.ver === readV ? null : b.dataset.ver;
+        touch();
+      }));
+      const vu = $("#ver-undo");
+      if (vu) vu.onclick = (e) => { e.preventDefault(); scan.versionOverride = null; touch(); };
       $$(".ov-row").forEach((row) => {
         const i = +row.dataset.i;
-        $$(".ob[data-c]", row).forEach((b) => (b.onclick = () => {
+        $$(".ob[data-c]", row).forEach((b) => (b.onclick = (e) => {
           const c = b.dataset.c;
-          if (c === (scan.responses[i] || "")) delete ov[i]; else ov[i] = c;
-          scan.updatedAt = St.now(); St.save(); render();
+          const cur = St.effectiveResponse(scan, i);
+          let next;
+          if (!c) next = "";
+          else if (e.shiftKey || e.metaKey || e.ctrlKey) next = (cur.includes(c) ? cur.replace(c, "") : cur + c).split("").sort().join("");
+          else next = cur === c ? "" : c;
+          if (next === (scan.responses[i] || "")) delete ov[i]; else ov[i] = next;
+          touch();
         }));
         const u = $("[data-undo]", row);
-        if (u) u.onclick = (e) => { e.preventDefault(); delete ov[i]; scan.updatedAt = St.now(); St.save(); render(); };
+        if (u) u.onclick = (e) => { e.preventDefault(); delete ov[i]; touch(); };
       });
     };
     render();
@@ -918,7 +1094,7 @@
       const key = res.test.id + ":" + res.sheetCode;
       cam.lastSeen = nowMs;
       if (cam.committed === key) { return; }
-      const sig = key + "|" + res.responses.join(",");
+      const sig = key + "|" + res.version + "|" + res.responses.join(",");
       if (cam.lastSig === sig) {
         cam.committed = key;
         cam.lastSig = null;
@@ -960,6 +1136,14 @@
     if (res.status === "ok") {
       const lay = L.computeLayout(res.test);
       ctx.fillStyle = "rgba(36,87,197,.8)";
+      if (lay.versionRow && res.version) {
+        const [dx, dy] = res.versionOffset;
+        for (const b of lay.versionRow.bubbles) {
+          if (!res.version.includes(b.label)) continue;
+          const [x, y] = S.project(res.H, b.cx + dx, b.cy + dy);
+          ctx.beginPath(); ctx.arc(x, y, lw * 2.2, 0, Math.PI * 2); ctx.fill();
+        }
+      }
       for (const q of lay.questions) {
         const [dx, dy] = res.offsets[q.index];
         for (const b of q.bubbles) {
@@ -991,9 +1175,12 @@
     }
     const t = res.test;
     if (res.sheetCode === L.SHEET_KEY) {
-      const fk = St.flatKey(t);
-      const diffs = fk.map((k, i) => (k !== res.responses[i] ? i + 1 : null)).filter(Boolean);
-      const msg = diffs.length ? `Answer key sheet: differs from the saved key on Q${diffs.join(", Q")}` : `Answer key sheet matches your saved key ✓`;
+      const labels = L.versionLabels(t);
+      const v = labels.length > 1 && labels.includes(res.version) ? res.version : "A";
+      const vk = St.versionKey(t, v);
+      const diffs = vk.map((k, i) => (St.keyInfo(k).letters !== res.responses[i].split("").sort().join("") ? i + 1 : null)).filter(Boolean);
+      const name = labels.length > 1 ? `Version ${v} answer key sheet` : "Answer key sheet";
+      const msg = diffs.length ? `${name}: differs from the saved key on Q${diffs.join(", Q")}` : `${name} matches your saved key ✓`;
       if (source === "camera") { setStatus(msg, diffs.length ? "warn" : "good"); beep(!diffs.length); flash(!diffs.length); }
       return { ok: true, msg, keyCheck: true };
     }
@@ -1002,11 +1189,12 @@
     const g = St.grade(t, scan);
     const f = scan.studentId ? St.findStudent(scan.studentId) : null;
     const who = f ? St.studentName(f.student) : `Blank sheet #${scan.sheetCode}`;
-    const nflag = res.flags.filter(Boolean).length;
-    const entry = { scanId: scan.id, who, test: t.title, g, nflag, replaced, at: Date.now(), source: fileName || source };
+    const nflag = St.flagCount(scan, g);
+    const ver = L.versionLabels(t).length > 1 ? ` · version ${g.version}${g.versionInferred ? "?" : ""}` : "";
+    const entry = { scanId: scan.id, who, test: t.title + ver, g, nflag, replaced, at: Date.now(), source: fileName || source };
     session.unshift(entry);
     if (source === "camera") {
-      setStatus(`<strong>✓ ${esc(who)}</strong> · ${esc(t.title)} · ${fmtPts(g.score)}/${fmtPts(g.possible)} (${pct(g.pct)})${nflag ? ` · <span class="warn-txt">${nflag} to check</span>` : ""}${replaced ? " · replaced earlier scan" : ""}<br><span class="muted small">Next sheet…</span>`, "good");
+      setStatus(`<strong>✓ ${esc(who)}</strong> · ${esc(t.title + ver)} · ${fmtPts(g.score)}/${fmtPts(g.possible)} (${pct(g.pct)})${nflag ? ` · <span class="warn-txt">${nflag} to check</span>` : ""}${replaced ? " · replaced earlier scan" : ""}<br><span class="muted small">Next sheet…</span>`, "good");
       beep(true); flash(true);
     }
     renderSessionList();
@@ -1053,11 +1241,12 @@
       : `<p class="muted">Sheets you scan appear here. Click one to review it or fix a misread bubble.</p>`;
     $$("[data-review]", el).forEach((b) => (b.onclick = () => {
       const wasRunning = cam.running;
+      if (!St.db.scans.some((x) => x.id === b.dataset.review)) return;
       cam.running = false;
       openReview(b.dataset.review, () => {
         const e = session.find((x) => x.scanId === b.dataset.review);
         const scan = St.db.scans.find((s) => s.id === b.dataset.review);
-        if (e && scan) e.g = St.grade(St.getTest(scan.testId), scan);
+        if (e && scan) { e.g = St.grade(St.getTest(scan.testId), scan); e.nflag = St.flagCount(scan, e.g); }
         if (e && !scan) session.splice(session.indexOf(e), 1);
         renderSessionList();
         if (wasRunning && cam.stream) { cam.running = true; loop(); }

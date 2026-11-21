@@ -163,7 +163,7 @@ details.help li { margin: 4px 0; }
 .key-sec { border-top: 1px solid var(--line); padding: 12px 0 6px; }
 .key-sec-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
 .key-quick { flex: 1; min-width: 200px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0.08em; text-transform: uppercase; }
-.key-rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 4px 18px; }
+.key-rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 18px; }
 .key-row { display: flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 6px; }
 .key-row.unset { background: #fff8ec; }
 .key-row .qn { width: 26px; text-align: right; font-weight: 700; font-size: 0.85rem; margin-right: 4px; color: #3a4658; }
@@ -292,3 +292,20 @@ details.help li { margin: 4px 0; }
   .print-page:last-child { break-after: auto; page-break-after: auto; }
   .print-page svg { display: block; width: 215.9mm; height: 279.4mm; }
 }
+
+/* ---------- answer-key modes & versions ---------- */
+.kmode { display: none; white-space: nowrap; font: inherit; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; margin-left: 4px; padding: 2px 7px; border-radius: 999px; border: 1px solid #c5cfdd; background: #f3f6fa; color: var(--muted); cursor: pointer; }
+.key-row.multi .kmode { display: inline-block; }
+.key-row.all .kmode { background: #fdf0e1; border-color: #f0c98f; color: var(--warn); }
+.key-row.all .kb.on { background: #b9640a; border-color: #b9640a; }
+.ver-block { border-top: 1px solid var(--line); padding: 12px 0 8px; }
+.ver-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.ver-head strong { margin-right: 6px; }
+.ver-sec { display: flex; align-items: center; gap: 10px; margin: 6px 0; flex-wrap: wrap; }
+.ver-range { font-weight: 700; color: var(--brand); min-width: 70px; font-size: 0.9rem; }
+.ver-order { flex: 1; min-width: 200px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.ver-order.invalid { border-color: var(--bad); background: #fff8f7; }
+.ver-key { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.vk code { letter-spacing: 0.06em; }
+.ver-bar { display: flex; align-items: center; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.ver-bar.flag { background: #fff6e3; }

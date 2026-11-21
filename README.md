@@ -14,8 +14,13 @@ stored in your browser on your device.
    4 × Always/Sometimes/Never, 16 × A–E*, with points per question. The answer
    sheet is generated from that format, so there's no separate sheet to set up
    and no library of old sheets. Enter the key by typing letters into each
-   section's box (`TFFTF`, `CADBE`…) or by clicking bubbles. Shift-click, or
-   type `(AC)`, to accept more than one answer.
+   section's box (`TFFTF`, `CADBE`…) or by clicking bubbles. For more than one
+   letter, shift-click or type:
+   - `(AC)`: **either**. Bubbling A alone or C alone earns full credit.
+   - `[AC]`: **all required**. The student must bubble exactly A and C; there's
+     no partial credit.
+
+   A tag on each multi-letter row switches between the two.
 3. **Print.** One sheet per student with their name printed on it, plus optional
    blank sheets (the student writes a name, and you match it after scanning) and an
    answer-key sheet you can scan to double-check the key.
@@ -30,6 +35,24 @@ stored in your browser on your device.
    outlined, and click a letter to fix anything misread. Changing the key
    regrades everything. Export results as CSV.
 
+### Versions
+
+Under **Build → Versions**, choose 2–6 versions (A–F). Version A uses the
+question order you built. For each other version, type the Version A question
+numbers in the order they appear on that version (for example `3 1 2 6 4 5`), or
+click **Shuffle**. Each version's key is worked out automatically and shown so
+you can check it against your printed test.
+
+- Questions move only within their own section, so every version uses the
+  same answer sheet. The sheet gets a **VERSION** bubble row at the top.
+- Each sheet is graded with its version's key. Results, item analysis and the
+  CSV use **Version A numbering**, so a question's statistics combine every
+  version.
+- If a student leaves the version blank (or bubbles two), the sheet is graded as
+  the version that fits best and flagged. You can change the version in Review.
+- The answer-key sheet option prints one key sheet per version.
+- Results can be filtered by version.
+
 ### Question types
 
 True/False, Always/Sometimes/Never, Yes/No, A–B through A–F, or any custom set of
@@ -42,7 +65,7 @@ questions have six choices).
   so printed sheets stay readable. (Points and the key can still change.) Choosing
   *Change format anyway* gives the test a new code, so old sheets are rejected
   instead of misread, and you reprint.
-- **Flags.** The scanner flags questions it isn't sure about: two bubbles filled,
+- **Flags.** The scanner flags questions it isn't sure about: two bubbles filled (unless the key requires several),
   a likely erasure, a very light mark, or a smudged area. Flagged questions are
   highlighted in Review and counted as "to check" in Results.
 - **Camera access** needs the page to be served over `https` (GitHub Pages is fine)
@@ -95,8 +118,9 @@ tests/            synthetic scanner tests + end-to-end test (Playwright)
 Run the tests (needs Node and Playwright):
 
 ```bash
-node tests/run-scanner-tests.js   # 13 synthetic photos: tilt, rotation, curl, shadow, blur, low-res…
+node tests/run-scanner-tests.js   # 15 synthetic photos: tilt, rotation, curl, shadow, blur, low-res…
 node tests/e2e.js                 # class → test → print → fill + photograph → scan → results
+node tests/e2e-versions.js        # versions, either / all-required keys, missing version bubble
 ```
 
 ## Deploying
