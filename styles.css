@@ -353,3 +353,4 @@ button.resp.other { min-width: 0; color: var(--muted); }
 .who-name { font: inherit; font-size: 0.88rem; background: #fff; border: 1px solid var(--line); border-radius: 999px; padding: 3px 11px; cursor: pointer; color: var(--ink); }
 .who-name:hover { border-color: var(--brand); color: var(--brand); }
 .stat-p { font-size: 1rem; font-weight: 650; color: var(--brand); font-variant-numeric: tabular-nums; min-height: 1.2em; }
+.stat-p.warn-txt { color: var(--warn); font-size: 0.85rem; }

@@ -971,7 +971,21 @@
       </div>
       ${fk.some((k) => !k) ? `<div class="notice">The answer key is incomplete (${fk.filter(Boolean).length}/${fk.length}). Unkeyed questions aren't scored. <a href="#/test/${t.id}/build">Finish the key</a></div>` : ""}
       <div class="stats">
-        <div class="stat"><div class="stat-n">${graded.length}${roster.length && !vfilter ? `<span class="muted">/${missing.length + named.length}</span>` : ""}</div><div class="stat-l">scanned</div></div>
+        ${roster.length && !vfilter
+          // Students scanned out of the class; unmatched blank sheets listed separately.
+          ? (() => {
+              // Count each student once, out of the class size (current filter).
+              const studentsIn = new Set(named.map((r) => r.student.id)).size;
+              const classSize = studentsIn + missing.length;
+              const extra = named.length - studentsIn;
+              const notes = [];
+              if (unassigned.length) notes.push(`+ ${unassigned.length} unmatched blank sheet${unassigned.length === 1 ? "" : "s"}`);
+              if (extra) notes.push(`${extra} student${extra === 1 ? " has" : "s have"} 2+ sheets`);
+              return `<div class="stat"><div class="stat-n">${studentsIn}<span class="muted">/${classSize}</span></div>
+              <div class="stat-p ${notes.length ? "warn-txt" : ""}">${notes.join("; ")}</div>
+              <div class="stat-l">students scanned</div></div>`;
+            })()
+          : `<div class="stat"><div class="stat-n">${graded.length}</div><div class="stat-p"></div><div class="stat-l">sheets scanned</div></div>`}
         ${statBox(mean, "mean")}
         ${statBox(median, "median")}
         ${statBox(pts.length ? pts[pts.length - 1] : NaN, "high")}

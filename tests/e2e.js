@@ -163,9 +163,15 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   await page.goto(base + `/#/test/${testId}/results`);
   await page.waitForSelector(".stats");
   await shot("06-results");
+  const scannedBox = async () => (await page.$eval(".stats .stat", (s) => s.textContent)).replace(/\s+/g, " ").trim();
+  let sb = await scannedBox();
+  assert(/^4\/4 \+ 1 unmatched blank sheet students scanned$/.test(sb), "Scanned box: 4/4 students, + 1 unmatched blank sheet (" + sb + ")");
   // assign the blank sheet to a student
+  page.once("dialog", (d) => d.accept());
   await page.selectOption("select[data-assign]", { index: 1 });
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(300);
+  sb = await scannedBox();
+  assert(/^4\/4 1 student has 2\+ sheets students scanned$/.test(sb), "after matching it to a student who already had a sheet: still 4/4, and it says one student has 2+ sheets (" + sb + ")");
   // review + override
   await page.click("[data-review]");
   await page.waitForSelector(".review");
