@@ -54,7 +54,8 @@ function assert(cond, msg) { if (!cond) throw new Error("ASSERT: " + msg); conso
   await page.setInputFiles("#tex-in", path.join(__dirname, "fixtures", "exam-sample.tex"));
   await page.waitForFunction(() => /found all 7 questions/.test(document.querySelector(".tex-box").textContent));
   assert(true, "exam file: all 7 questions found");
-  assert(/differ from your answer key on Q4, Q5, Q6, Q7/.test((await page.textContent(".tex-box")).replace(/\s+/g, " ")), "\\CorrectChoice answers offered for the unkeyed questions");
+  const diffTxt = (await page.textContent(".tex-box")).replace(/\s+/g, " ");
+  assert(/differ from your answer key on 4 questions/.test(diffTxt) && /Q4: file B, your key blank/.test(diffTxt), "\\CorrectChoice answers offered for the unkeyed questions, with details");
   await page.click("#tex-usekey");
   const key = await page.evaluate(() => MGStore.flatKey(MGStore.db.tests[0]));
   assert(key.join("") === "TFTBCAD", "key filled from the file: " + key.join(""));
@@ -84,6 +85,28 @@ function assert(cond, msg) { if (!cond) throw new Error("ASSERT: " + msg); conso
   const toast = await page.textContent("#toast");
   assert(/Changed “Version A” to “Version B” in 2 places/.test(toast), "toast reports relabel");
   if (process.argv[2]) await page.screenshot({ path: path.join(process.argv[2], "latex-panel.png"), fullPage: true });
+
+  // A key entered as "either" (e.g. shift-click) vs an all-required answer in the file.
+  await page.goto(base + "/#/tests");
+  await page.click("#new-test");
+  await page.waitForSelector("#t-title");
+  await page.selectOption(".sec-row[data-i='0'] .sec-type", "TF");
+  await page.fill(".sec-row[data-i='0'] .sec-count", "3");
+  await page.dispatchEvent(".sec-row[data-i='0'] .sec-count", "change");
+  await page.click("[data-add='AD']");
+  await page.fill(".sec-row[data-i='1'] .sec-count", "9");
+  await page.dispatchEvent(".sec-row[data-i='1'] .sec-count", "change");
+  const qk = await page.$$(".key-quick");
+  await qk[0].fill("TFF");
+  await qk[1].fill("BACABDAC(AC)");
+  await page.selectOption("#v-count", "2");
+  await page.setInputFiles("#tex-in", path.join(__dirname, "fixtures", "exam-macros-sample.tex"));
+  await page.waitForFunction(() => /found all 12 questions/.test(document.querySelector(".tex-box").textContent));
+  const t2 = (await page.textContent(".tex-box")).replace(/\s+/g, " ");
+  assert(/differ from your answer key on 1 question/.test(t2) && /Q12: file A \+ C \(all required\), your key A or C \(either\)/.test(t2), "either-vs-all-required difference is spelled out");
+  await page.click("#tex-usekey");
+  const k2 = await page.evaluate(() => MGStore.flatKey(MGStore.db.tests[0]));
+  assert(k2[11] === "&AC", "using the file's answers makes Q12 all-required");
 
   assert(errors.length === 0, "no page errors" + (errors.length ? ": " + errors.join(" | ") : ""));
   await browser.close();

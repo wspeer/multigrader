@@ -559,8 +559,15 @@
       if (chk.ok && chk.warnings.length) body += `<div class="notice small">${chk.warnings.slice(0, 4).map(esc).join("<br>")}${chk.warnings.length > 4 ? `<br>…and ${chk.warnings.length - 4} more` : ""}</div>`;
       if (chk.ok && chk.keyFromTex.some(Boolean)) {
         const n = chk.keyFromTex.filter(Boolean).length;
+        const describe = (k) => {
+          if (!k) return "blank";
+          const { letters, all } = St.keyInfo(k);
+          return letters.length < 2 ? letters : `${St.keyText(k)} (${all ? "all required" : "either"})`;
+        };
+        const diffList = chk.keyDiffs.slice(0, 8).map((i) => `<li>Q${i + 1}: file <strong>${esc(describe(chk.keyFromTex[i]))}</strong>, your key <strong>${esc(describe(fk[i]))}</strong></li>`).join("") +
+          (chk.keyDiffs.length > 8 ? `<li>…and ${chk.keyDiffs.length - 8} more</li>` : "");
         body += chk.keyDiffs.length
-          ? `<div class="notice small">The file marks the answers to ${n} question${n > 1 ? "s" : ""}. ${chk.keyDiffs.length === n && fk.every((k) => !k) ? "Your answer key is empty." : `They differ from your answer key on Q${chk.keyDiffs.map((i) => i + 1).join(", Q")}.`}
+          ? `<div class="notice small">The file marks the answers to ${n} question${n > 1 ? "s" : ""}. ${chk.keyDiffs.length === n && fk.every((k) => !k) ? "Your answer key is empty." : `They differ from your answer key on ${chk.keyDiffs.length} question${chk.keyDiffs.length > 1 ? "s" : ""}:<ul class="diff-list">${diffList}</ul>`}
               <button class="btn small primary" id="tex-usekey">Use the file's answers</button></div>`
           : `<p class="good-txt small">The answers marked in the file match your key on all ${n} question${n > 1 ? "s" : ""} ✓</p>`;
       }
