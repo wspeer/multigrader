@@ -55,27 +55,9 @@
     return null;
   }
 
-  /* "Last, First" | "First Last" | "First<TAB>Last", one per line. */
+  /* Pasted or recognized roster text → [{ first, last, form }] (see js/roster.js). */
   function parseRoster(text) {
-    const out = [];
-    for (let line of text.split(/\r?\n/)) {
-      line = line.trim();
-      if (!line) continue;
-      let first, last;
-      if (line.includes("\t")) {
-        const p = line.split("\t").map((x) => x.trim()).filter(Boolean);
-        if (p.length >= 2) { first = p[0]; last = p.slice(1).join(" "); } else { first = p[0]; last = ""; }
-      } else if (line.includes(",")) {
-        const [l, ...f] = line.split(",");
-        last = l.trim(); first = f.join(",").trim();
-      } else {
-        const p = line.split(/\s+/);
-        last = p.length > 1 ? p.pop() : "";
-        first = p.join(" ");
-      }
-      out.push({ first, last });
-    }
-    return out;
+    return root.MGRoster.parse(text);
   }
 
   function addClass(name) {

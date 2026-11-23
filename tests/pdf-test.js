@@ -38,7 +38,8 @@ const have = (cmd) => { try { execFileSync(cmd, ["-v"], { stdio: "ignore" }); re
   await page.click("#c-new");
   await page.waitForSelector("#c-paste");
   await page.fill("#c-paste", "Núñez, José\nO'Brien, Zoë\nWiśniewski, Łukasz\nChen, Ana (Annie)");
-  await page.click("#c-add");
+  await page.waitForSelector("#imp-add:not([disabled])");
+  await page.click("#imp-add");
   await page.waitForSelector("tr[data-sid]");
 
   await page.goto(base + "/#/tests");

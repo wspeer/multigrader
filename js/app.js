@@ -1025,14 +1025,15 @@
     }));
     $("#r-csv").onclick = () => {
       const quick = (k) => { const { letters, all } = St.keyInfo(k); return letters.length > 1 ? (all ? `[${letters}]` : `(${letters})`) : letters; };
-      const head = ["Last", "First", "Class", ...(hasV ? ["Version"] : []), "Score", "Possible", "Percent", ...qc.map((_, i) => "Q" + (i + 1))];
+      const hasForm = graded.some((r) => r.student && r.student.form);
+      const head = ["Last", "First", ...(hasForm ? ["Form"] : []), "Class", ...(hasV ? ["Version"] : []), "Score", "Possible", "Percent", ...qc.map((_, i) => "Q" + (i + 1))];
       const lines = [head];
       for (const r of graded) {
-        lines.push([r.student ? r.student.last : "", r.student ? r.student.first : `Blank sheet #${r.scan.sheetCode}`, r.cls ? r.cls.name : "",
+        lines.push([r.student ? r.student.last : "", r.student ? r.student.first : `Blank sheet #${r.scan.sheetCode}`, ...(hasForm ? [(r.student && r.student.form) || ""] : []), r.cls ? r.cls.name : "",
           ...(hasV ? [r.g.version + (r.g.versionInferred ? "?" : "")] : []),
           fmtPts(r.g.score), fmtPts(r.g.possible), (Math.round(r.g.pct * 10) / 10).toString(), ...r.g.items.map((it) => (it ? it.resp : ""))]);
       }
-      lines.push(["", "KEY", "", ...(hasV ? ["A"] : []), "", "", "", ...fk.map(quick)]);
+      lines.push(["", "KEY", ...(hasForm ? [""] : []), "", ...(hasV ? ["A"] : []), "", "", "", ...fk.map(quick)]);
       const csv = lines.map((l) => l.map((v) => /[",\n]/.test(v) ? `"${String(v).replace(/"/g, '""')}"` : v).join(",")).join("\n");
       download(`${safeFileName(t.title)} results.csv`, csv, "text/csv");
     };
@@ -1198,13 +1199,21 @@
       <div class="form-row"><label class="grow">Class name <input id="c-name" value="${esc(cls.name)}"/></label></div>
       <h2>Roster <span class="muted small">(${students.length})</span></h2>
       ${students.length ? `<div class="table-wrap"><table class="table roster">
-        <thead><tr><th>First</th><th>Last</th><th></th></tr></thead>
-        <tbody>${students.map((s) => `<tr data-sid="${s.id}"><td><input class="s-first" value="${esc(s.first)}"/></td><td><input class="s-last" value="${esc(s.last)}"/></td><td><button class="icon-btn danger" data-rm title="Remove">✕</button></td></tr>`).join("")}</tbody>
+        <thead><tr><th>First</th><th>Last</th><th class="form-col">Form <span class="muted">(optional)</span></th><th></th></tr></thead>
+        <tbody>${students.map((s) => `<tr data-sid="${s.id}"><td><input class="s-first" value="${esc(s.first)}"/></td><td><input class="s-last" value="${esc(s.last)}"/></td><td class="form-col"><input class="s-form" value="${esc(s.form || "")}" placeholder="–"/></td><td><button class="icon-btn danger" data-rm title="Remove">✕</button></td></tr>`).join("")}</tbody>
       </table></div>` : `<p class="muted">No students yet.</p>`}
-      <div class="field">
-        <label>Add students: paste one per line as <code>Last, First</code>, <code>First Last</code>, or two spreadsheet columns
-          <textarea id="c-paste" rows="5" placeholder="Garcia, Maria&#10;Chen, David&#10;Sam Okafor"></textarea></label>
-        <button class="btn" id="c-add">Add to roster</button>
+      <div class="import-box" id="c-import">
+        <h3>Add students</h3>
+        <p class="muted small"><strong>Paste a screenshot</strong> of your roster right here (Ctrl+V / ⌘V), drop an image file on this box, or paste text:
+          one student per line (<code>Last, First</code> or <code>First Last</code>) or rows copied from a spreadsheet or CSV export.
+          A form/grade in brackets, like <code>(IV)</code>, is kept; other tags such as “Advanced” are dropped. You'll check the names before they're added.</p>
+        <div class="btn-row">
+          <label class="btn" for="c-img">Choose a screenshot…</label>
+          <input type="file" id="c-img" accept="image/*" class="visually-hidden" />
+        </div>
+        <textarea id="c-paste" rows="4" placeholder="Garcia, Maria (IV)&#10;Chen, David (V)&#10;Sam Okafor"></textarea>
+        <div id="c-status" class="small"></div>
+        <div id="c-preview"></div>
       </div>
       <div class="danger-zone"><button class="btn ghost danger small" id="c-del">Delete class</button></div>`;
     $("#c-name").oninput = (e) => { cls.name = e.target.value; cls.updatedAt = St.now(); saveSoon(); const a = $(`.class-list a.active`); if (a) a.firstChild.textContent = cls.name + " "; };
@@ -1212,19 +1221,95 @@
       const s = cls.students.find((x) => x.id === tr.dataset.sid);
       $(".s-first", tr).oninput = (e) => { s.first = e.target.value.trim(); cls.updatedAt = St.now(); saveSoon(); };
       $(".s-last", tr).oninput = (e) => { s.last = e.target.value.trim(); cls.updatedAt = St.now(); saveSoon(); };
+      $(".s-form", tr).oninput = (e) => { s.form = e.target.value.trim(); cls.updatedAt = St.now(); saveSoon(); };
       $("[data-rm]", tr).onclick = () => {
         if (!confirm(`Remove ${St.studentName(s)} from ${cls.name}? Their scanned results stay in your tests.`)) return;
         cls.students = cls.students.filter((x) => x !== s); cls.updatedAt = St.now(); St.save(); viewClasses(cls.id);
       };
     });
-    $("#c-add").onclick = () => {
-      const list = St.parseRoster($("#c-paste").value);
-      if (!list.length) return;
-      for (const p of list) cls.students.push({ id: St.uid(), first: p.first, last: p.last });
-      cls.updatedAt = St.now(); St.save();
-      toast(`Added ${list.length} student${list.length > 1 ? "s" : ""}.`);
-      viewClasses(cls.id);
+
+    // ---- import: text or screenshot → preview → add ----
+    let rows = [];
+    const key = (f, l) => `${f} ${l}`.toLowerCase().replace(/\s+/g, " ").trim();
+    const existing = new Set(cls.students.map((s) => key(s.first, s.last)));
+    const status = (html, kind) => { $("#c-status").innerHTML = html; $("#c-status").className = "small " + (kind || ""); };
+    const setRows = (list, fromImage) => {
+      const seen = new Set();
+      rows = list.map((p) => {
+        const k = key(p.first, p.last);
+        const dup = existing.has(k) || seen.has(k);
+        seen.add(k);
+        return { first: p.first, last: p.last, form: p.form || "", include: !dup, dup };
+      });
+      renderPreview(fromImage);
     };
+    const renderPreview = (fromImage) => {
+      const box = $("#c-preview");
+      if (!rows.length) { box.innerHTML = ""; return; }
+      const n = rows.filter((r) => r.include && (r.first || r.last)).length;
+      box.innerHTML = `
+        <p class="small ${fromImage ? "warn-txt" : "muted"}">${fromImage ? "Check the names against your roster: text recognition can misread letters or drop accents (e.g. Román → Roman)." : "Check the names, then add them."} Uncheck anyone you don't want; click a name to fix it.</p>
+        <div class="table-wrap"><table class="table roster import-preview">
+          <thead><tr><th><input type="checkbox" id="imp-all" ${rows.every((r) => r.include) ? "checked" : ""} title="All"/></th><th>First</th><th>Last</th><th class="form-col">Form</th><th></th></tr></thead>
+          <tbody>${rows.map((r, i) => `<tr data-i="${i}" class="${r.dup ? "dup" : ""}">
+            <td><input type="checkbox" data-inc ${r.include ? "checked" : ""}/></td>
+            <td><input data-f="first" value="${esc(r.first)}"/></td>
+            <td><input data-f="last" value="${esc(r.last)}"/></td>
+            <td class="form-col"><input data-f="form" value="${esc(r.form)}" placeholder="–"/></td>
+            <td class="muted small">${r.dup ? "already in class" : ""}</td></tr>`).join("")}</tbody>
+        </table></div>
+        <div class="btn-row">
+          <button class="btn primary" id="imp-add" ${n ? "" : "disabled"}>Add ${n} student${n === 1 ? "" : "s"}</button>
+          <button class="btn" id="imp-swap" title="If first and last names came out reversed">Swap first ↔ last</button>
+          <button class="btn ghost" id="imp-clear">Clear</button>
+        </div>`;
+      $$("tr[data-i]", box).forEach((tr) => {
+        const r = rows[+tr.dataset.i];
+        $("[data-inc]", tr).onchange = (e) => { r.include = e.target.checked; renderPreview(fromImage); };
+        $$("[data-f]", tr).forEach((inp) => (inp.oninput = () => { r[inp.dataset.f] = inp.value.trim(); }));
+      });
+      $("#imp-all").onchange = (e) => { rows.forEach((r) => (r.include = e.target.checked)); renderPreview(fromImage); };
+      $("#imp-swap").onclick = () => { rows.forEach((r) => ([r.first, r.last] = [r.last, r.first])); renderPreview(fromImage); };
+      $("#imp-clear").onclick = () => { rows = []; $("#c-paste").value = ""; status(""); renderPreview(); };
+      $("#imp-add").onclick = () => {
+        const add = rows.filter((r) => r.include && (r.first || r.last));
+        for (const r of add) cls.students.push({ id: St.uid(), first: r.first, last: r.last, ...(r.form ? { form: r.form } : {}) });
+        cls.updatedAt = St.now(); St.save();
+        toast(`Added ${add.length} student${add.length === 1 ? "" : "s"}.`);
+        viewClasses(cls.id);
+      };
+    };
+    let parseTimer;
+    $("#c-paste").oninput = () => {
+      clearTimeout(parseTimer);
+      parseTimer = setTimeout(() => setRows(St.parseRoster($("#c-paste").value)), 250);
+    };
+    const readImage = async (file) => {
+      if (!file || !/^image\//.test(file.type)) return;
+      if (!window.MGOcr) { status("Text recognition isn't available here.", "bad-txt"); return; }
+      status(`<span class="spinner"></span> Loading text recognition (first time only)…`);
+      try {
+        const text = await MGOcr.readText(file, (label, frac) => status(`<span class="spinner"></span> ${esc(label)} ${frac ? Math.round(frac * 100) + "%" : ""}`));
+        const list = St.parseRoster(text);
+        $("#c-paste").value = text.replace(/\n{2,}/g, "\n").trim();
+        if (!list.length) { status("No names found in that image. Try a sharper or larger screenshot, or paste the names as text.", "warn-txt"); setRows([]); return; }
+        status(`Found ${list.length} name${list.length === 1 ? "" : "s"} in the screenshot.`, "good-txt");
+        setRows(list, true);
+      } catch (e) {
+        console.error(e);
+        status("Couldn't read that image: " + esc(e.message || String(e)), "bad-txt");
+      }
+    };
+    $("#c-img").onchange = (e) => { readImage(e.target.files[0]); e.target.value = ""; };
+    const box = $("#c-import");
+    box.ondragover = (e) => { e.preventDefault(); box.classList.add("drag"); };
+    box.ondragleave = () => box.classList.remove("drag");
+    box.ondrop = (e) => { e.preventDefault(); box.classList.remove("drag"); readImage([...e.dataTransfer.files].find((f) => /^image\//.test(f.type))); };
+    classPasteHandler = (e) => {
+      const img = [...(e.clipboardData && e.clipboardData.files || [])].find((f) => /^image\//.test(f.type));
+      if (img) { e.preventDefault(); readImage(img); }
+    };
+
     $("#c-del").onclick = () => {
       if (!confirm(`Delete the class "${cls.name}"? Tests and scanned results are kept.`)) return;
       St.db.classes = St.db.classes.filter((c) => c !== cls);
@@ -1232,6 +1317,12 @@
       St.save(); location.hash = "#/classes";
     };
   }
+
+  // A screenshot pasted anywhere on a class page goes to the roster import.
+  let classPasteHandler = null;
+  document.addEventListener("paste", (e) => {
+    if (classPasteHandler && $("#c-import")) classPasteHandler(e);
+  });
 
   /* ================================================================
    * SCAN

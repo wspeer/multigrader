@@ -8,8 +8,17 @@ stored in your browser on your device.
 
 ## How it works
 
-1. **Classes.** Create a class and paste in the roster (`Last, First`, `First Last`,
-   or two columns copied from a spreadsheet).
+1. **Classes.** Create a class and add its roster. You can paste a
+   **screenshot** of the roster (Ctrl+V / ⌘V), drop an image file, or paste text:
+   one student per line (`Last, First` or `First Last`), or rows copied from a
+   spreadsheet or CSV export, with or without a header row. A form or grade in
+   brackets, such as `(IV)` or `(11)`, or a Form/Grade/Year column, is saved as
+   the student's optional **Form**. Other tags like "Advanced" or "AP", and
+   numbering, emails and IDs, are dropped. You check and edit the names in a
+   preview before they're added, and students already in the class are skipped.
+   Screenshots are read in the browser with the bundled Tesseract OCR engine
+   (`vendor/tesseract`). Nothing is uploaded, but it can drop accents
+   (Román → Roman), so check the preview.
 2. **Build.** Create a test and list its sections, for example *5 × True/False,
    4 × Always/Sometimes/Never, 16 × A–E*, with points per question. The answer
    sheet is generated from that format, so there's no separate sheet to set up
@@ -157,6 +166,9 @@ js/scanner.js     image → answers
 js/store.js       localStorage / IndexedDB data, grading, backup merge
 js/latex.js       find and reorder questions in a LaTeX file
 js/pdf.js         answer sheets as a PDF (vector, built-in Helvetica, no libraries)
+js/roster.js      pasted / recognized roster text → names (+ optional Form)
+js/ocr.js         read a roster screenshot (bundled Tesseract, loaded on demand)
+vendor/tesseract/ OCR engine + English model (Apache-2.0; see its README)
 js/app.js         UI
 tests/            synthetic scanner tests + end-to-end test (Playwright)
 ```
@@ -170,6 +182,8 @@ node tests/e2e-versions.js        # versions, either / all-required keys, missin
 node tests/latex-test.js          # finding and reordering questions in .tex files
 node tests/e2e-latex.js           # upload .tex → key from \CorrectChoice → shuffle → download
 node tests/pdf-test.js            # PDF download: page size, text, every page scans (needs poppler-utils)
+node tests/roster-test.js         # roster text formats (CSV/spreadsheet/OCR lines, Form)
+node tests/e2e-roster.js          # roster import: text, duplicates, screenshot via file and paste
 ```
 
 ## Deploying

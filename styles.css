@@ -316,3 +316,15 @@ details.help li { margin: 4px 0; }
 .diff-list { margin: 6px 0 8px; padding-left: 20px; }
 .lock-pill { background: #eef3fd; color: var(--brand); }
 .ver-block.locked .ver-order { background: #f3f5f8; color: #4a5568; cursor: default; }
+
+/* ---------- roster import ---------- */
+.import-box { border: 1px dashed #c5cfdd; border-radius: 10px; padding: 14px 16px; margin-top: 16px; background: #fafbfd; }
+.import-box.drag { border-color: var(--brand); background: var(--brand-soft); }
+.import-box h3 { margin: 0 0 6px; font-size: 1rem; }
+.import-box textarea { margin: 8px 0 6px; }
+.roster .form-col { width: 90px; }
+.roster .form-col input { width: 70px; }
+.import-preview tr.dup td { background: #f6f7f9; color: var(--muted); }
+.import-preview td:first-child, .import-preview th:first-child { width: 34px; }
+.spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #c5cfdd; border-top-color: var(--brand); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -2px; margin-right: 6px; }
+@keyframes spin { to { transform: rotate(360deg); } }

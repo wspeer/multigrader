@@ -42,7 +42,8 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   await page.click("#c-new");
   await page.waitForSelector("#c-paste");
   await page.fill("#c-paste", "Garcia, Maria\nChen, David\nSam Okafor\nLee\tJordan");
-  await page.click("#c-add");
+  await page.waitForSelector("#imp-add:not([disabled])");
+  await page.click("#imp-add");
   await page.waitForSelector("tr[data-sid]");
   assert((await page.$$("tr[data-sid]")).length === 4, "roster has 4 students");
   await shot("02-class");

@@ -38,7 +38,8 @@ function assert(cond, msg) { if (!cond) throw new Error("ASSERT: " + msg); conso
   await page.click("#c-new");
   await page.waitForSelector("#c-paste");
   await page.fill("#c-paste", "Adams, Ann\nBrown, Ben\nCruz, Cara\nDiaz, Dev");
-  await page.click("#c-add");
+  await page.waitForSelector("#imp-add:not([disabled])");
+  await page.click("#imp-add");
   await page.waitForSelector("tr[data-sid]");
 
   // test: 6 × A–D, 4 × T/F
