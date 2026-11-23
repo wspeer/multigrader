@@ -457,11 +457,31 @@
   /* Version A question numbers that must not move (1-based). */
   function fixedSet(t) { return new Set((t.fixedQuestions || []).filter((x) => Number.isInteger(x))); }
 
+  /* Groups from the LaTeX file (questions separated by headings), if known. */
+  function texBlocks(t) {
+    const n = L.questionChoices(t).length;
+    return t.texBlocks && t.texBlocks.length === n ? t.texBlocks : null;
+  }
+
+  /* Shuffle each section, keeping questions inside their group in the LaTeX
+   * file (so none crosses a heading) and leaving "keep in place" ones alone. */
   function shuffleVersion(t, v) {
     const fixed = fixedSet(t);
+    const blocks = texBlocks(t);
     sectionRanges(t).forEach((r, si) => {
-      const local = new Set([...fixed].filter((x) => x >= r.start + 1 && x <= r.end + 1).map((x) => x - r.start - 1));
-      St.setSectionOrder(t, v, t.sections[si], shuffled(r.n, local));
+      const order = Array.from({ length: r.n }, (_, i) => i);
+      const groups = new Map();
+      for (let i = 0; i < r.n; i++) {
+        const g = blocks ? blocks[r.start + i] : 0;
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g).push(i);
+      }
+      for (const pos of groups.values()) {
+        const local = new Set(pos.map((_, k) => k).filter((k) => fixed.has(r.start + pos[k] + 1)));
+        const o = shuffled(pos.length, local);
+        pos.forEach((p, k) => (order[p] = pos[o[k]]));
+      }
+      St.setSectionOrder(t, v, t.sections[si], order);
     });
   }
 
@@ -479,11 +499,17 @@
     if (!out.ok) return out;
     p.questions.forEach((q, i) => {
       if (q.choices && q.choices !== qc[i].length) out.warnings.push(`Q${i + 1} has ${q.choices} answer choices in the file, but the test format gives it ${qc[i].length} (${qc[i].join("")}).`);
-      if (q.correct.length) {
-        const letters = q.correct.map((ix) => qc[i][ix]).filter(Boolean).join("");
-        const k = St.makeKey(letters, q.correct.length > 1);
-        out.keyFromTex[i] = k;
-        if (k !== fk[i]) out.keyDiffs.push(i);
+      let letters = null, all = false;
+      if (q.correctIdx.length) { letters = q.correctIdx.map((ix) => qc[i][ix]); all = q.correctIdx.length > 1; }
+      else if (q.key) { letters = q.key; all = q.keyAll; }
+      if (letters) {
+        const bad = letters.filter((x) => !x || !qc[i].includes(x));
+        if (bad.length) out.warnings.push(`Q${i + 1}: the file's answer ${letters.map((x) => x || "?").join(", ")} isn't among this question's bubbles (${qc[i].join("")}). Check the question format.`);
+        const k = St.makeKey(letters.filter((x) => x && qc[i].includes(x)).join(""), all);
+        if (k) {
+          out.keyFromTex[i] = k;
+          if (k !== fk[i]) out.keyDiffs.push(i);
+        }
       }
     });
     return out;
@@ -506,9 +532,19 @@
       : `Downloaded Version ${v}. No “Version A” label was found in the file; add one to your header so students know which version to bubble.`);
   }
 
+  function groupRanges(p) {
+    const out = [];
+    p.questions.forEach((q, i) => {
+      if (i === 0 || q.block !== p.questions[i - 1].block) out.push([i + 1, i + 1]);
+      else out[out.length - 1][1] = i + 1;
+    });
+    return out.map(([a, b]) => (a === b ? `Q${a}` : `Q${a}–${b}`));
+  }
+
   function texPanel(t, labels) {
     const tex = ui(t).tex;
     const chk = texCheck(t);
+    const fk = St.flatKey(t);
     const fixed = (t.fixedQuestions || []).join(" ");
     let body = "";
     if (tex) {
@@ -516,16 +552,20 @@
       body += chk.ok
         ? `<p class="good-txt small"><strong>${esc(tex.name)}</strong>: found all ${p.questions.length} questions (${p.mode === "exam" ? "exam class \\question" : "numbered list \\item"}) ✓</p>`
         : `<div class="notice bad small"><strong>${esc(tex.name)}</strong>: ${esc(chk.error)}</div>`;
+      if (chk.ok) {
+        const nb = new Set(p.questions.map((q) => q.block)).size;
+        if (nb > 1) body += `<p class="muted small">Your file has ${nb} groups of questions separated by headings or instructions (${groupRanges(p).join(", ")}). Shuffle keeps each question inside its group.</p>`;
+      }
       if (chk.ok && chk.warnings.length) body += `<div class="notice small">${chk.warnings.slice(0, 4).map(esc).join("<br>")}${chk.warnings.length > 4 ? `<br>…and ${chk.warnings.length - 4} more` : ""}</div>`;
       if (chk.ok && chk.keyFromTex.some(Boolean)) {
         const n = chk.keyFromTex.filter(Boolean).length;
         body += chk.keyDiffs.length
-          ? `<div class="notice small">The file marks correct answers (\\CorrectChoice) on ${n} question${n > 1 ? "s" : ""}. They differ from your answer key on Q${chk.keyDiffs.map((i) => i + 1).join(", Q")}.
-              <button class="btn small" id="tex-usekey">Use the file's answers</button></div>`
-          : `<p class="good-txt small">The file's \\CorrectChoice answers match your key on all ${n} question${n > 1 ? "s" : ""} ✓</p>`;
+          ? `<div class="notice small">The file marks the answers to ${n} question${n > 1 ? "s" : ""}. ${chk.keyDiffs.length === n && fk.every((k) => !k) ? "Your answer key is empty." : `They differ from your answer key on Q${chk.keyDiffs.map((i) => i + 1).join(", Q")}.`}
+              <button class="btn small primary" id="tex-usekey">Use the file's answers</button></div>`
+          : `<p class="good-txt small">The answers marked in the file match your key on all ${n} question${n > 1 ? "s" : ""} ✓</p>`;
       }
       if (p.questions.length) {
-        body += `<details class="help"><summary>Questions found in the file (${p.questions.length})</summary><ol class="tex-list">${p.questions.map((q) => `<li>${esc(q.preview || "(empty)")}${q.choices ? ` <span class="muted">· ${q.choices} choices</span>` : ""}</li>`).join("")}</ol></details>`;
+        body += `<details class="help"><summary>Questions found in the file (${p.questions.length})</summary><ol class="tex-list">${p.questions.map((q) => `<li>${q.block !== (p.questions[p.questions.indexOf(q) - 1] || q).block ? `<span class="tex-break"></span>` : ""}${esc(q.preview || "(empty)")}${q.key || q.correctIdx.length ? ` <span class="muted">· answer ${esc(q.key ? q.key.join(q.keyAll ? "+" : "") : q.correctIdx.map((x) => "ABCDEF"[x]).join("+"))}</span>` : ""}${q.choices ? ` <span class="muted">· ${q.choices} choices</span>` : ""}</li>`).join("")}</ol></details>`;
       }
     }
     return `
@@ -588,6 +628,8 @@
       if (!f) return;
       const text = await f.text();
       ui(t).tex = { name: f.name, text, parsed: MGLatex.parse(text) };
+      const chk = texCheck(t);
+      if (chk && chk.ok) { t.texBlocks = ui(t).tex.parsed.questions.map((q) => q.block); saveSoon(t); }
       renderVersions(t);
     };
     const fx = $("#tex-fixed");
@@ -608,7 +650,7 @@
         sec.key[i - ranges[si].start] = k;
       });
       saveSoon(t); renderKey(t); renderVersions(t);
-      toast("Answer key updated from the file's \\CorrectChoice answers.");
+      toast("Answer key filled in from the answers marked in the file.");
     };
 
     const vc = $("#v-count");
@@ -630,7 +672,11 @@
           const bad = nums.filter((x) => x < r.start + 1 || x > r.end + 1);
           if (!missing.length && !dup.length && !bad.length && nums.length === r.n) {
             St.setSectionOrder(t, v, sec, nums.map((x) => x - r.start - 1));
-            msg.innerHTML = `<span class="good-txt">✓</span>`;
+            const blocks = texBlocks(t);
+            const crossing = blocks ? nums.filter((x, k) => blocks[x - 1] !== blocks[r.start + k]) : [];
+            msg.innerHTML = crossing.length
+              ? `<span class="warn-txt">✓ saved, but Q${crossing.join(", Q")} would move across a heading in your LaTeX file</span>`
+              : `<span class="good-txt">✓</span>`;
             inp.classList.remove("invalid");
             $(".vk-list", blk).innerHTML = versionKeyText(t, v);
             saveSoon(t);

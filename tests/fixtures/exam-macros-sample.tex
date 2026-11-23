@@ -1,0 +1,56 @@
+\documentclass[11pt]{exam}
+\usepackage{multicol}
+\newcounter{testpart}
+\newcommand\NextPart{\stepcounter{testpart}\textbf{Part \Roman{testpart}.}}
+\header{Course}{Quiz 7}{Teacher}
+% the answer is the first argument; printed only with \printanswers
+\newcommand\KeyedQuestion[2]{\ifprintanswers\textbf{#1}\quad\fi #2}
+\newcommand\TFQuestion[2]{\KeyedQuestion{#1}{#2}}
+\newcommand\MCQuestion[2]{\KeyedQuestion{(#1)}{#2}}
+\newcommand\CAQuestion[2]{\KeyedQuestion{(#1)}{#2}}
+\begin{document}
+\begin{questions}
+\fullwidth{%
+\noindent \NextPart{} True or false.\\
+}
+\setlength{\itemsep}{9pt}
+
+% ---------- topic 1 ----------
+\question\TFQuestion{T}{Statement one.} %note on one
+\question\TFQuestion{F}{Statement two.} %note on two
+
+% ---------- topic 2 ----------
+\question\TFQuestion{F}{Statement three.} %note on three
+
+\fullwidth{%
+\newpage
+\noindent \NextPart{} Bubble A, B or C.
+}
+\setlength{\itemsep}{8pt}
+\begin{multicols}{2}
+\question\MCQuestion{B}{Item four}
+\question\MCQuestion{A}{Item five}
+\question\MCQuestion{C}{Item six}
+\end{multicols}
+
+\fullwidth{%
+\noindent \NextPart{} Compare the quantities.
+}
+\question\MCQuestion{A}{\makebox[1in][l]{Quantity A: 7}Quantity B: 8}
+\question\MCQuestion{B}{\makebox[1in][l]{Quantity A: 9}Quantity B: 10}
+
+\fullwidth{%
+\noindent For problems \ref{q:first} through \ref{q:last}, bubble one arrow.
+}
+\setlength{\itemsep}{6pt}
+\question\label{q:first}\MCQuestion{D}{Arrow nine}
+\question\MCQuestion{A}{Arrow ten}
+\question\label{q:last}\MCQuestion{C}{Arrow eleven}
+
+\fullwidth{%
+\noindent Bubble all that apply (no partial credit).
+}
+\question\label{q:all}\CAQuestion{A, C}{Arrows twelve}
+
+\end{questions}
+\end{document}

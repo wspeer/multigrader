@@ -1,17 +1,29 @@
 /* MultiGrader — find the questions in a LaTeX test and reorder them.
  *
  * Supported layouts:
- *   • exam class:  \begin{questions} \question … \question … \end{questions}
- *     (also \titledquestion and \bonusquestion)
+ *   • exam class:  \begin{questions} \question … \end{questions}
+ *     (also \titledquestion and \bonusquestion; questions may sit inside
+ *     environments such as multicols within the questions list)
  *   • any class:   a numbered list \begin{enumerate} \item … \end{enumerate}
  *     (only items of top-level enumerate lists; nested lists stay inside
  *     their question, so answer choices move with it)
  *
- * Questions can be spread over several lists (e.g. one per part). Reordering
- * swaps question *contents* between the existing slots, so anything between
- * questions that isn't part of one stays where it is. That includes page breaks
- * and headings right after a question, such as \newpage, \clearpage,
- * \pagebreak, \uplevel{…}, \fullwidth{…} and \section{…}.
+ * Reordering swaps question *contents* between the existing slots. Anything
+ * between questions stays where it is: headings and instructions such as
+ * \fullwidth{…} / \uplevel{…}, \setlength…, page breaks, comment-only lines,
+ * and environment boundaries (e.g. \begin{multicols}). Questions are also
+ * grouped into "blocks": consecutive questions with nothing but blank lines or
+ * comments between them. A question never moves outside its block, so it
+ * never crosses a heading.
+ *
+ * A \label placed right after \question stays with the *position* (so ranges
+ * like "problems \ref{first} through \ref{last}" stay correct).
+ *
+ * Answers are read from the file when it marks them:
+ *   • \CorrectChoice (exam class), or
+ *   • a question macro whose first argument is the answer, e.g.
+ *     \TFQuestion{F}{…}, \MCQuestion{B}{…}, \CAQuestion{A, C}{…}
+ *     (several letters = all required).
  */
 (function (root) {
   "use strict";
@@ -19,12 +31,15 @@
   const VERBATIM = new Set(["verbatim", "verbatim*", "lstlisting", "minted", "comment", "Verbatim"]);
   const LISTS = new Set(["enumerate", "itemize", "description", "questions", "parts", "subparts", "subsubparts", "choices", "oneparchoices", "checkboxes", "oneparcheckboxes"]);
   const QUESTION_CMDS = new Set(["question", "titledquestion", "bonusquestion"]);
-  const FIXED_CMDS = new Set(["newpage", "clearpage", "cleardoublepage", "pagebreak", "uplevel", "fullwidth", "section", "subsection", "subsubsection", "section*", "subsection*", "subsubsection*"]);
+  const FIXED_CMDS = new Set([
+    "newpage", "clearpage", "cleardoublepage", "pagebreak", "uplevel", "fullwidth",
+    "section", "subsection", "subsubsection", "section*", "subsection*", "subsubsection*",
+    "setlength", "addtolength", "setcounter", "addtocounter",
+  ]);
 
   /* Walk the source, skipping comments and verbatim, calling visit(kind, info). */
   function walk(src, from, to, visit) {
     let i = from;
-    const stack = [];
     while (i < to) {
       const c = src[i];
       if (c === "%") {
@@ -46,11 +61,7 @@
               i = j < 0 ? to : j + endTok.length;
               continue;
             }
-            visit(name, { pos: i, env, len: mm[0].length, stack });
-            if (name === "begin") stack.push({ name: env, pos: i });
-            else {
-              for (let k = stack.length - 1; k >= 0; k--) if (stack[k].name === env) { stack.length = k; break; }
-            }
+            visit(name, { pos: i, env, len: mm[0].length });
             i += mm[0].length;
             continue;
           }
@@ -61,16 +72,17 @@
           i = j < 0 ? to : j + 1;
           continue;
         }
-        visit("cmd", { pos: i, name, len: m[0].length, stack });
+        visit("cmd", { pos: i, name, len: m[0].length });
         i += m[0].length;
         continue;
       }
-      if (c === "{" || c === "}") visit(c, { pos: i, stack });
+      if (c === "{" || c === "}") visit(c, { pos: i });
       i++;
     }
   }
 
-  /* End of a command's arguments: optional *, then [..] and {..} groups. */
+  /* End of a command's arguments: optional *, then [..] and {..} groups.
+   * Also accepts a bare control-sequence argument (\setlength\foo{..}). */
   function argsEnd(src, i, limit) {
     let j = i;
     for (;;) {
@@ -86,6 +98,9 @@
         }
         if (p >= limit) return j;
         j = p + 1;
+      } else if (src[k] === "\\" && /[A-Za-z]/.test(src[k + 1] || "") && j === i) {
+        const m = /^\\[A-Za-z]+/.exec(src.slice(k, k + 64));
+        j = k + m[0].length;
       } else return j;
     }
   }
@@ -93,13 +108,17 @@
   const blankish = (s) => s.replace(/(^|[^\\])%.*$/gm, "$1").trim() === "";
 
   /**
-   * Parse a LaTeX test. Returns
-   *   { mode: "exam" | "enumerate", questions: [{ start, bodyEnd, end, preview,
-   *     choices, correct }], error }
-   * start..bodyEnd is the question itself; bodyEnd..end stays in its slot.
+   * Parse a LaTeX test. Returns { mode, questions, error }. Each question has
+   *   start..bodyEnd  the question itself (moves),
+   *   headEnd         end of "\question[2]" (always travels with the question),
+   *   labelStart/End  a \label right after the head (stays with the slot),
+   *   bodyEnd..end    trailing material that stays in the slot,
+   *   block           questions only move within their block,
+   *   key             answer letters found in the file (or null), keyAll,
+   *   choices         number of answer choices found (0 if none),
+   *   preview         short plain-text preview.
    */
   function parse(src) {
-    // 1. Candidate question starts and the end of each enclosing environment.
     const envEnd = new Map();
     const open = [];
     const qStarts = [], itemStarts = [];
@@ -116,9 +135,9 @@
       } else if (kind === "cmd") {
         const top = open[open.length - 1];
         if (QUESTION_CMDS.has(info.name) && open.some((e) => e.name === "questions")) {
-          qStarts.push({ pos: info.pos, parent: top });
+          qStarts.push({ pos: info.pos, name: info.name, chain: open.slice() });
         } else if (info.name === "item" && top && top.name === "enumerate" && open.filter((e) => LISTS.has(e.name)).length === 1) {
-          itemStarts.push({ pos: info.pos, parent: top });
+          itemStarts.push({ pos: info.pos, name: info.name, chain: open.slice() });
         }
       }
     });
@@ -128,15 +147,23 @@
       return { mode, questions: [], error: "No questions found. MultiGrader looks for \\question inside \\begin{questions} (exam class), or \\item in a numbered \\begin{enumerate} list. If your questions are in separate files pulled in with \\input, upload a single combined file." };
     }
 
-    // 2. Each question runs until the next question in the same list, or the end of that list.
+    // A question ends at the next question, at the start of an environment
+    // that holds the next question (e.g. \begin{multicols}), or at the end
+    // of its own environment.
     const questions = starts.map((s, k) => {
-      let end = envEnd.has(s.parent) ? envEnd.get(s.parent) : src.length;
-      for (let j = k + 1; j < starts.length; j++) if (starts[j].parent === s.parent) { end = Math.min(end, starts[j].pos); break; }
-      return { start: s.pos, end };
+      const P = s.chain[s.chain.length - 1];
+      let end = envEnd.has(P) ? envEnd.get(P) : src.length;
+      const nx = starts[k + 1];
+      if (nx) {
+        const idx = nx.chain.indexOf(P);
+        if (idx === nx.chain.length - 1) end = Math.min(end, nx.pos);
+        else if (idx >= 0) end = Math.min(end, nx.chain[idx + 1].pos);
+      }
+      return { start: s.pos, end, cmd: s.name };
     });
 
-    // 3. Trailing page breaks / headings stay in the slot, not with the question.
     for (const q of questions) {
+      // Trailing headings / spacing commands stay in the slot.
       const spans = [];
       let braces = 0, envs = 0;
       walk(src, q.start, q.end, (kind, info) => {
@@ -154,34 +181,77 @@
         if (blankish(src.slice(spans[k].end, t))) t = spans[k].start;
         else break;
       }
+      // Then trailing whitespace and whole-line comments (not a comment on
+      // the question's own last line).
       let b = t;
-      while (b > q.start && /\s/.test(src[b - 1])) b--;
+      for (;;) {
+        while (b > q.start && /\s/.test(src[b - 1])) b--;
+        const ls = src.lastIndexOf("\n", b - 1) + 1;
+        if (ls > q.start && /^[ \t]*%/.test(src.slice(ls, b))) { b = ls; continue; }
+        break;
+      }
       q.bodyEnd = b;
 
-      // Answer choices (exam class \choice / \CorrectChoice) for checking.
+      // Head (\question[pts]) and a \label right after it.
       const body = src.slice(q.start, q.bodyEnd);
+      const head = q.cmd === "titledquestion"
+        ? /^\\titledquestion\*?\s*\{[^{}]*\}(\s*\[[^\]]*\])?/.exec(body)
+        : /^\\[A-Za-z]+\*?(\s*\[[^\]]*\])?/.exec(body);
+      q.headEnd = q.start + (head ? head[0].length : 0);
+      const lab = /^\s*(\\label\s*\{[^}]*\}\s*)+/.exec(src.slice(q.headEnd, q.bodyEnd));
+      q.labelStart = q.headEnd;
+      q.labelEnd = q.headEnd + (lab ? lab[0].length : 0);
+
+      // Answers marked in the file.
       const choices = [];
       walk(body, 0, body.length, (kind, info) => {
         if (kind === "cmd" && (info.name === "choice" || info.name === "CorrectChoice")) choices.push(info.name === "CorrectChoice");
       });
-      if (!choices.length && mode === "enumerate") {
-        // Items of the first nested numbered list = the answer choices.
-        let depth = 0, n = 0, list = 0, inChoices = false;
-        walk(body, 0, body.length, (kind, info) => {
-          if (kind === "begin" && LISTS.has(info.env)) {
-            depth++;
-            if (depth === 1) { list++; inChoices = list === 1 && info.env === "enumerate"; }
-          } else if (kind === "end" && LISTS.has(info.env)) depth--;
-          else if (kind === "cmd" && info.name === "item" && depth === 1 && inChoices) n++;
-        });
-        q.choices = n;
-      } else q.choices = choices.length;
-      q.correct = choices.map((c, i) => (c ? i : -1)).filter((i) => i >= 0);
+      q.key = null;
+      q.keyAll = false;
+      if (choices.length) {
+        q.choices = choices.length;
+        q.correctIdx = choices.map((c, i) => (c ? i : -1)).filter((i) => i >= 0);
+      } else {
+        q.choices = mode === "enumerate" ? countItemChoices(body) : 0;
+        q.correctIdx = [];
+      }
+      const mk = /^\s*\\([A-Za-z]*Question)\s*\{([^{}]*)\}/.exec(src.slice(q.labelEnd, q.bodyEnd));
+      if (mk) {
+        const letters = mk[2].split(/[\s,;]+/).filter(Boolean);
+        if (letters.length && letters.every((x) => /^[A-Za-z0-9]$/.test(x))) {
+          q.key = letters.map((x) => x.toUpperCase());
+          q.keyAll = letters.length > 1;
+          q.keyMacro = mk[1];
+        }
+      }
 
-      const text = body.replace(/^\\[A-Za-z]+\*?(\[[^\]]*\])?/, "").replace(/%.*$/gm, "").replace(/\s+/g, " ").trim();
+      let text = src.slice(q.labelEnd, q.bodyEnd);
+      if (mk && q.key) text = text.slice(mk[0].length);
+      text = text.replace(/%.*$/gm, "").replace(/\\(makebox|parbox)\s*(\[[^\]]*\])*/g, "").replace(/\s+/g, " ").trim();
+      if (mk && q.key) text = text.replace(/^\{/, "").replace(/\}$/, "").trim();
       q.preview = text.length > 90 ? text.slice(0, 88) + "…" : text;
     }
+
+    // Blocks: consecutive questions with only blank lines / comments between them.
+    let block = 0;
+    questions.forEach((q, k) => {
+      if (k > 0 && !blankish(src.slice(questions[k - 1].bodyEnd, q.start))) block++;
+      q.block = block;
+    });
     return { mode, questions, error: null };
+  }
+
+  function countItemChoices(body) {
+    let depth = 0, n = 0, list = 0, inChoices = false;
+    walk(body, 0, body.length, (kind, info) => {
+      if (kind === "begin" && LISTS.has(info.env)) {
+        depth++;
+        if (depth === 1) { list++; inChoices = list === 1 && info.env === "enumerate"; }
+      } else if (kind === "end" && LISTS.has(info.env)) depth--;
+      else if (kind === "cmd" && info.name === "item" && depth === 1 && inChoices) n++;
+    });
+    return n;
   }
 
   /* Rebuild the document with question perm[k] in slot k. */
@@ -190,7 +260,11 @@
     let out = "", prev = 0;
     qs.forEach((slot, k) => {
       const q = qs[perm[k]];
-      out += src.slice(prev, slot.start) + src.slice(q.start, q.bodyEnd) + src.slice(slot.bodyEnd, slot.end);
+      out += src.slice(prev, slot.start) +
+        src.slice(q.start, q.headEnd) + // \question[pts] of the moved question
+        src.slice(slot.labelStart, slot.labelEnd) + // the slot's own \label
+        src.slice(q.labelEnd, q.bodyEnd) + // the moved question's content
+        src.slice(slot.bodyEnd, slot.end); // what follows the slot
       prev = slot.end;
     });
     return out + src.slice(prev);

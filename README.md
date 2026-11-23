@@ -63,14 +63,25 @@ lists, which may be spread over several lists. Click **Shuffle**, then
 **⬇ Version B .tex** to get the reordered file. That version's answer key is
 already set, and it's written as a comment at the top of the file.
 
-- Answer choices, figures, `solution` blocks and anything else inside a
-  question move with it. Page breaks and headings that sit between questions
-  (`\newpage`, `\clearpage`, `\pagebreak`, `\uplevel{…}`, `\fullwidth{…}`,
-  `\section{…}`) stay where they are.
+- Answer choices, figures, `solution` blocks, same-line comments and anything
+  else inside a question move with it. Everything between questions stays where
+  it is: headings and instructions (`\fullwidth{…}`, `\uplevel{…}`,
+  `\section{…}`), spacing (`\setlength…`), page breaks, comment-only lines, and
+  environment boundaries such as `\begin{multicols}`.
+- **Groups:** questions separated by a heading or instructions in the file form
+  a group. Shuffle never moves a question out of its group, even when two parts
+  share one MultiGrader section. For example, two A–C parts can be one section
+  without being mixed.
+- **Labels:** a `\label{…}` right after `\question` stays with the position, so
+  "problems `\ref{first}` through `\ref{last}`" stays correct.
+- **Answers in the file:** if the file marks answers with `\CorrectChoice`, or
+  with a question macro whose first argument is the answer (`\TFQuestion{F}{…}`,
+  `\MCQuestion{B}{…}`, `\CAQuestion{A, C}{…}`; several letters means all are
+  required), MultiGrader checks them against your key and can fill the key in.
+  With `\printanswers` on, the reordered file prints the new version's key.
 - "Version A" in the text, and `\newcommand{\version}{A}`, become the new
-  version letter.
-- If the file marks answers with `\CorrectChoice`, MultiGrader checks them
-  against your key and can fill the key in from the file.
+  version letter. Tip: define `\newcommand{\version}{A}` and put
+  `Version \version` in your header.
 - The number of questions found must match the test's format; the list of
   what was found is shown so you can check it. Answer choices aren't shuffled,
   only questions.

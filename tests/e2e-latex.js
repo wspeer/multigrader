@@ -79,7 +79,7 @@ function assert(cond, msg) { if (!cond) throw new Error("ASSERT: " + msg); conso
   assert(/\\newcommand\{\\version\}\{B\}/.test(out) && /\{Version B\}/.test(out), "version labels changed to B");
   const vkey = await page.evaluate(() => MGStore.versionKey(MGStore.db.tests[0], "B"));
   assert(out.split("\n")[2].includes(vkey.map((k, i) => `${i + 1}:${k}`).join(" ")), "key comment at top of file: " + out.split("\n")[2]);
-  const letters = pb.questions.map((q, i) => (q.correct.length ? "ABCD"[q.correct[0]] : vkey[i]));
+  const letters = pb.questions.map((q, i) => (q.correctIdx.length ? "ABCD"[q.correctIdx[0]] : vkey[i]));
   assert(letters.join("") === vkey.join(""), "\\CorrectChoice in the new file matches version B's key");
   const toast = await page.textContent("#toast");
   assert(/Changed “Version A” to “Version B” in 2 places/.test(toast), "toast reports relabel");
