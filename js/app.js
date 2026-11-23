@@ -1025,9 +1025,7 @@
 
       ${graded.length ? `<section class="card">
         <h2>Item analysis</h2>
-        <p class="muted small">How often each answer was chosen; correct answers are highlighted, and questions most students missed are shaded.
-          ${hasV ? "Questions are numbered as on <strong>Version A</strong>; answers from every version are matched to the same question." : ""}
-          For “all required” questions, each bar counts how many students bubbled that letter.</p>
+        <p class="muted small">${hasV ? "Questions are numbered as on Version A. " : ""}Click an individual response to see which students bubbled that letter.</p>
         <div class="table-wrap"><table class="table items">
           <thead><tr><th>${sortButton("q-sort", "Q", ui(t).itemSort, "q", ["1 → last", "last → 1"], "Sort by question number: first to last, last to first, or back to question order")}</th><th>Key</th><th class="num">${sortButton("item-sort", "Correct", ui(t).itemSort, "pct", ["lowest first", "highest first"], "Sort by percent correct: lowest first, highest first, or back to question order")}</th><th>Responses</th></tr></thead>
           <tbody>${(() => {
