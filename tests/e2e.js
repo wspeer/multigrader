@@ -253,12 +253,34 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   await page.click("#student-sort");
   assert(JSON.stringify(await sOrder()) === JSON.stringify(s0), "3rd click: back to name order");
 
+  // ---- students: sort by name (last name), and switching columns ----
+  const lastOf = (rows) => rows.filter((r) => !/Blank sheet/.test(r[0])).map((r) => r[0].split(" ").pop());
+  await page.click("#name-sort");
+  const nm1 = lastOf(await sOrder());
+  assert(nm1.join() === [...nm1].sort((a, b) => a.localeCompare(b)).join() && /A–Z/.test(await page.textContent("#name-sort")), "Student header: 1st click A–Z by last name (" + nm1.join(", ") + ")");
+  await page.click("#name-sort");
+  const nm2 = lastOf(await sOrder());
+  assert(nm2.join() === [...nm1].reverse().join() && /Z–A/.test(await page.textContent("#name-sort")), "2nd click: Z–A");
+  await page.click("#student-sort");
+  assert(!(await page.$eval("#name-sort", (b) => b.classList.contains("on"))) && (await page.$eval("#student-sort", (b) => b.classList.contains("on"))), "clicking Score switches the sort to Score (one column at a time)");
+  await page.click("#student-sort");
+  await page.click("#student-sort");
+  assert(JSON.stringify(await sOrder()) === JSON.stringify(s0), "back to the usual order");
+
+  // ---- item analysis: sort by question number ----
+  await page.click("#q-sort");
+  assert((await order()).map((r) => r[0]).join() === o0.map((r) => r[0]).join() && /1 → last/.test(await page.textContent("#q-sort")), "Q header: 1st click first to last");
+  await page.click("#q-sort");
+  assert((await order()).map((r) => r[0]).join() === o0.map((r) => r[0]).reverse().join() && /last → 1/.test(await page.textContent("#q-sort")), "2nd click: last to first");
+  await page.click("#q-sort");
+  assert((await order()).map((r) => r[0]).join() === o0.map((r) => r[0]).join() && !(await page.$eval("#q-sort", (b) => b.classList.contains("on"))), "3rd click: off, question order");
+
   // ---- item analysis: who gave a particular answer ----
   const whoExpected = (q, c) => page.evaluate(([q, c]) => {
     const t = MGStore.db.tests[0];
     return MGStore.db.scans.map((s) => ({ s, it: MGStore.grade(t, s).items[q] }))
       .filter(({ it }) => (c === "blank" ? !it.resp : c === "multiple" ? it.resp.length > 1 : it.resp === c))
-      .map(({ s }) => { const f = s.studentId && MGStore.findStudent(s.studentId); return f ? MGStore.studentName(f.student) : `Blank sheet #${s.sheetCode}`; }).sort();
+      .map(({ s }) => { const f = s.studentId && MGStore.findStudent(s.studentId); return f ? `${f.student.last}, ${f.student.first}` : `Blank sheet #${s.sheetCode}`; }).sort();
   }, [q, c]);
   const whoShown = () => page.$$eval(".who-row .who-name", (bs) => bs.map((b) => b.childNodes[0].textContent.trim()).sort());
   const wantF = await whoExpected(0, "F");
@@ -273,7 +295,7 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   assert(JSON.stringify(await whoShown()) === JSON.stringify(wantMulti) && /\(A, C\)/.test(await page.textContent(".who-row")), `Q20 → multiple shows ${wantMulti.join(", ")} with the letters bubbled (A, C)`);
   await page.click(".who-row .who-name");
   await page.waitForSelector(".review");
-  assert((await page.textContent(".review h2")).trim() === wantMulti[0], "clicking a name opens that student's sheet");
+  assert((await page.textContent(".review h2")).trim() === wantMulti[0].split(", ").reverse().join(" "), "clicking a name opens that student's sheet");
   await page.click("#m-done");
   await page.waitForSelector(".who-row");
   await page.click(".items [data-iq='19'][data-ic='multiple']");

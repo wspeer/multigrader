@@ -42,9 +42,10 @@ stored in your browser on your device.
    tests: each sheet's code strip says which test and which student it is.
 5. **Results.** Scores, mean/median/high/low, who hasn't been scanned, and an
    item analysis: how often each answer was chosen, with low-scoring questions
-   highlighted. Click the **Correct** header (and the **Score** header in the
-   student list) to sort:
-   lowest first, then highest first, then back to question order. Click any
+   highlighted. Headers marked ⇅ sort when clicked (once ascending, again
+   descending, a third time back to normal): **Student** (by last name) and
+   **Score** in the student list, and **Q** and **Correct** in the item
+   analysis. Click any
    response (an answer, "blank" or "multiple") to see which students gave it;
    click a name to open that student's sheet.
    - **Review** shows the scanned sheet with every mark outlined. Click a

@@ -917,9 +917,11 @@
    * ================================================================ */
 
   /* A clickable column header that cycles: off → lowest first → highest first. */
-  function sortButton(id, label, mode, title) {
-    const m = mode || 0;
-    const note = ["", "lowest first", "highest first"][m];
+  /* A clickable column header that cycles: off → ascending → descending → off.
+   * state is { col, dir } for the table (one sorted column at a time). */
+  function sortButton(id, label, state, col, notes, title) {
+    const m = state && state.col === col ? state.dir : 0;
+    const note = ["", notes[0], notes[1]][m];
     return `<button type="button" class="th-sort ${m ? "on" : ""}" id="${id}" title="${esc(title)}" aria-label="${esc(label)}: ${note || "not sorted"}. ${esc(title)}">` +
       `${esc(label)} <span class="sort-arrow">${["⇅", "▲", "▼"][m]}</span>${note ? `<span class="sort-note">${note}</span>` : ""}</button>`;
   }
@@ -973,7 +975,7 @@
         <h2>Students</h2>
         ${graded.length === 0 && missing.length === 0 ? `<p class="muted">Nothing scanned yet. Go to <a href="#/scan">Scan</a>.</p>` : `
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>Student</th>${classes.length > 1 ? "<th>Class</th>" : ""}${hasV ? "<th>Ver.</th>" : ""}<th class="num">${sortButton("student-sort", "Score", ui(t).studentSort, "Sort by score: lowest first, highest first, or by name")}</th><th class="num">%</th><th>Check</th><th>Scanned</th><th></th></tr></thead>
+          <thead><tr><th>${sortButton("name-sort", "Student", ui(t).studentSort, "name", ["A–Z", "Z–A"], "Sort by last name: A–Z, Z–A, or back to the usual order")}</th>${classes.length > 1 ? "<th>Class</th>" : ""}${hasV ? "<th>Ver.</th>" : ""}<th class="num">${sortButton("student-sort", "Score", ui(t).studentSort, "score", ["lowest first", "highest first"], "Sort by score: lowest first, highest first, or back to name order")}</th><th class="num">%</th><th>Check</th><th>Scanned</th><th></th></tr></thead>
           <tbody>
             ${(() => {
               const rowHTML = (r) => r.student ? `<tr>
@@ -987,10 +989,12 @@
               <td>${r.nflag ? `<span class="pill warn">${r.nflag} to check</span>` : ""}</td>
               <td class="muted small">${fmtTime(r.scan.scannedAt)}</td>
               <td><button class="btn small" data-review="${r.scan.id}">Review</button></td></tr>`;
-              // 0 = by name (blank sheets after), 1 = lowest score first, 2 = highest first.
-              const mode = ui(t).studentSort || 0;
+              // Default: by last name, blank sheets after. Or sorted by name / score.
+              const st = ui(t).studentSort;
               const list = named.concat(unassigned);
-              if (mode) list.sort((a, b) => (mode === 1 ? a.g.pct - b.g.pct : b.g.pct - a.g.pct) || list.indexOf(a) - list.indexOf(b));
+              const nameKey = (r) => (r.student ? `${r.student.last} ${r.student.first}`.toLowerCase() : "\uffff" + String(r.scan.sheetCode).padStart(5, "0"));
+              if (st && st.col === "score") list.sort((a, b) => (st.dir === 1 ? a.g.pct - b.g.pct : b.g.pct - a.g.pct) || list.indexOf(a) - list.indexOf(b));
+              if (st && st.col === "name") list.sort((a, b) => (st.dir === 1 ? 1 : -1) * nameKey(a).localeCompare(nameKey(b)));
               return list.map(rowHTML).join("");
             })()}
             ${missing.map((x) => `<tr class="missing"><td>${esc(St.studentName(x.student))}</td>${classes.length > 1 ? `<td>${esc(x.cls.name)}</td>` : ""}<td colspan="${ncols - 1 - (classes.length > 1 ? 1 : 0)}" class="muted">not scanned</td></tr>`).join("")}
@@ -1004,7 +1008,7 @@
           ${hasV ? "Questions are numbered as on <strong>Version A</strong>; answers from every version are matched to the same question." : ""}
           For “all required” questions, each bar counts how many students bubbled that letter.</p>
         <div class="table-wrap"><table class="table items">
-          <thead><tr><th>Q</th><th>Key</th><th class="num">${sortButton("item-sort", "Correct", ui(t).itemSort, "Sort by percent correct: lowest first, highest first, or question order")}</th><th>Responses</th></tr></thead>
+          <thead><tr><th>${sortButton("q-sort", "Q", ui(t).itemSort, "q", ["1 → last", "last → 1"], "Sort by question number: first to last, last to first, or back to question order")}</th><th>Key</th><th class="num">${sortButton("item-sort", "Correct", ui(t).itemSort, "pct", ["lowest first", "highest first"], "Sort by percent correct: lowest first, highest first, or back to question order")}</th><th>Responses</th></tr></thead>
           <tbody>${(() => {
             const items = qc.map((ch, i) => {
               const ki = St.keyInfo(fk[i]);
@@ -1020,9 +1024,10 @@
               }
               return { i, ch, ki, counts, blank, multi, p: fk[i] ? (100 * correct) / graded.length : NaN };
             });
-            // 0 = question order, 1 = lowest % first, 2 = highest % first (unkeyed last).
-            const mode = ui(t).itemSort || 0;
-            if (mode) items.sort((a, b) => (isNaN(a.p) - isNaN(b.p)) || (mode === 1 ? a.p - b.p : b.p - a.p) || a.i - b.i);
+            // Default: question order. Or by question number / % correct (unkeyed last).
+            const st = ui(t).itemSort;
+            if (st && st.col === "pct") items.sort((a, b) => (isNaN(a.p) - isNaN(b.p)) || (st.dir === 1 ? a.p - b.p : b.p - a.p) || a.i - b.i);
+            if (st && st.col === "q" && st.dir === 2) items.reverse();
             // Each response is a button; clicking it lists who gave that answer.
             const open = ui(t).itemOpen;
             const isOpen = (i, c) => open && open.q === i && open.c === c;
@@ -1031,7 +1036,7 @@
             const who = (i, c, ki) => {
               const match = (resp) => (c === "blank" ? !resp : c === "multiple" ? resp.length > 1 && !ki.all : ki.all ? resp.includes(c) : resp === c);
               const list = graded.filter((r) => r.g.items[i] && match(r.g.items[i].resp))
-                .map((r) => ({ r, name: r.student ? St.studentName(r.student) : `Blank sheet #${r.scan.sheetCode}`, sort: r.student ? (r.student.last + " " + r.student.first).toLowerCase() : "~" + r.scan.sheetCode }))
+                .map((r) => ({ r, name: r.student ? (r.student.last ? `${r.student.last}, ${r.student.first}` : r.student.first) : `Blank sheet #${r.scan.sheetCode}`, sort: r.student ? (r.student.last + " " + r.student.first).toLowerCase() : "~" + r.scan.sheetCode }))
                 .sort((a, b) => a.sort.localeCompare(b.sort));
               const what = c === "blank" ? "left it blank" : c === "multiple" ? "bubbled more than one answer" : ki.all ? `bubbled ${esc(c)}` : `answered ${esc(c)}`;
               return `<tr class="who-row"><td colspan="4"><div class="who">
@@ -1049,16 +1054,17 @@
     const rf = $("#r-filter");
     if (rf) rf.onchange = () => { ui(t).filter = rf.value; viewResults(t); };
     const rerender = () => { const y = window.scrollY; viewResults(t); window.scrollTo(0, y); }; // stay at the table
-    const is = $("#item-sort");
-    if (is) is.onclick = () => {
-      ui(t).itemSort = ((ui(t).itemSort || 0) + 1) % 3;
+    // Sort headers: click the same column to go ascending → descending → off;
+    // clicking another column starts sorting by that one.
+    const cycle = (key, col) => {
+      const s = ui(t)[key];
+      ui(t)[key] = s && s.col === col ? (s.dir === 1 ? { col, dir: 2 } : null) : { col, dir: 1 };
       rerender();
     };
-    const ss = $("#student-sort");
-    if (ss) ss.onclick = () => {
-      ui(t).studentSort = ((ui(t).studentSort || 0) + 1) % 3;
-      rerender();
-    };
+    for (const [id, key, col] of [["item-sort", "itemSort", "pct"], ["q-sort", "itemSort", "q"], ["student-sort", "studentSort", "score"], ["name-sort", "studentSort", "name"]]) {
+      const b = $("#" + id);
+      if (b) b.onclick = () => cycle(key, col);
+    }
     $$("[data-iq]").forEach((b) => (b.onclick = () => {
       const q = +b.dataset.iq, c = b.dataset.ic, o = ui(t).itemOpen;
       ui(t).itemOpen = o && o.q === q && o.c === c ? null : { q, c };
