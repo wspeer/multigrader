@@ -423,7 +423,27 @@
     const cross = (x, y, s) => { line([[x - s, y - s], [x + s, y + s]], RED, 0.6); line([[x + s, y - s], [x - s, y + s]], RED, 0.6); };
 
     rect(0, 0, PAGE.w, PAGE.h, { fill: "#fff" });
-    ops.push({ t: "image", x: 0, y: 0, w: PAGE.w, h: PAGE.h, jpeg: o.image });
+    // Show the scan only where there's content (header, version row, answer
+    // columns); the margins, where fingers holding the sheet usually are,
+    // stay white.
+    const clip = [{ x: AREA_LEFT - 3, y: 26.5, w: AREA_RIGHT - AREA_LEFT + 6, h: 29 }];
+    if (layout.versionRow) {
+      const v = layout.versionRow;
+      clip.push({ x: v.x - 5, y: v.cy - 7, w: v.width + 9, h: 14 });
+    }
+    const offs = o.offsets || [];
+    for (const col of layout.columns) {
+      const qs = layout.questions.filter((q) => q.index >= col.start && q.index < col.end);
+      if (!qs.length) continue;
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (const q of qs) {
+        const [dx, dy] = offs[q.index] || [0, 0];
+        x0 = Math.min(x0, q.x + dx); x1 = Math.max(x1, q.x + dx + col.width);
+        y0 = Math.min(y0, q.cy + dy - PITCH_Y / 2); y1 = Math.max(y1, q.cy + dy + PITCH_Y / 2);
+      }
+      clip.push({ x: x0 - 1.5, y: y0 - 1, w: x1 - x0 + 3, h: y1 - y0 + 2 });
+    }
+    ops.push({ t: "image", x: 0, y: 0, w: PAGE.w, h: PAGE.h, jpeg: o.image, clip });
 
     // Cover the corner squares and code strip (top and bottom bands).
     rect(6, 6, PAGE.w - 12, 20.5, { fill: "#fff" });

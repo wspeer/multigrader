@@ -116,7 +116,9 @@
       if (o.t === "image" && images) {
         const name = "Im" + (Object.keys(images).length + 1);
         images[name] = o;
-        out.push(`q ${f(o.w * K)} 0 0 ${f(o.h * K)} ${X(o.x)} ${Y(o.y + o.h)} cm /${name} Do Q`);
+        // Optional clip: only show the image inside these rectangles (mm).
+        const clip = o.clip && o.clip.length ? o.clip.map((r) => `${X(r.x)} ${Y(r.y + r.h)} ${f(r.w * K)} ${f(r.h * K)} re`).join(" ") + " W n " : "";
+        out.push(`q ${clip}${f(o.w * K)} 0 0 ${f(o.h * K)} ${X(o.x)} ${Y(o.y + o.h)} cm /${name} Do Q`);
       } else if (o.t === "rect" || o.t === "circle") {
         const path = o.t === "rect" ? roundRectPath(o.x, o.y, o.w, o.h, o.rx) : circlePath(o.cx, o.cy, o.r);
         if (o.fill && o.fill !== "none") out.push(`${rgb(o.fill)} rg ${path} f`);

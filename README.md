@@ -55,8 +55,10 @@ stored in your browser on your device.
    - Changing the key regrades everything.
    - **⬇ Graded copies of all bubble sheets (PDF)** makes one page per
      student to hand back instead of their marked-up sheet. It uses the
-     student's own scanned sheet (their actual pencil marks), with a ring around
-     each correct answer, ✓/✗, and their score. Answers you corrected in Review
+     student's own scanned sheet (their actual pencil marks), brightened to
+     white paper, with a ring around each correct answer, ✓/✗, and their score.
+     Only the header and answer area of the scan are shown, so fingers holding
+     the sheet in the margins don't appear. Answers you corrected in Review
      are noted ("graded as F"). The corner squares and code strip are covered,
      so a copy can't be scanned (or altered and resubmitted). If a scan's image
      isn't on this device (it was scanned elsewhere), a clean drawn copy is used

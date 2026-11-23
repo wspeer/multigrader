@@ -85,6 +85,33 @@
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   }
 
+  /* Brighten a scanned sheet for printing: paper becomes white, pencil marks
+   * stay dark. Returns JPEG bytes (or null if the image can't be read). */
+  async function whitenScan(blob) {
+    try {
+      const bmp = await createImageBitmap(blob);
+      const c = document.createElement("canvas");
+      c.width = bmp.width; c.height = bmp.height;
+      const ctx = c.getContext("2d");
+      ctx.drawImage(bmp, 0, 0);
+      const d = ctx.getImageData(0, 0, c.width, c.height);
+      const hist = new Uint32Array(256);
+      for (let i = 0; i < d.data.length; i += 4) hist[d.data[i]]++;
+      const total = d.data.length / 4;
+      const at = (p) => { let n = 0; for (let v = 0; v < 256; v++) { n += hist[v]; if (n >= total * p) return v; } return 255; };
+      // Most of the sheet is paper: its brightness sets "white".
+      const white = Math.max(60, at(0.6) * 0.96), black = Math.min(at(0.005), white - 40);
+      const lut = new Uint8ClampedArray(256);
+      for (let v = 0; v < 256; v++) lut[v] = ((v - black) * 255) / (white - black);
+      for (let i = 0; i < d.data.length; i += 4) { const g = lut[d.data[i]]; d.data[i] = d.data[i + 1] = d.data[i + 2] = g; }
+      ctx.putImageData(d, 0, 0);
+      const out = await new Promise((res) => c.toBlob(res, "image/jpeg", 0.85));
+      return out ? new Uint8Array(await out.arrayBuffer()) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   function grayToBlob(img) {
     const c = document.createElement("canvas");
     c.width = img.w; c.height = img.h;
@@ -1121,7 +1148,7 @@
             score: r.g.score, possible: r.g.possible, pct: r.g.pct,
           };
           const blob = await St.getImage(r.scan.id);
-          const bytes = blob ? new Uint8Array(await blob.arrayBuffer()) : null;
+          const bytes = blob ? await whitenScan(blob) : null;
           if (bytes && MGPdf.jpegInfo(bytes)) pages.push(L.gradedScanOps(t, { ...o, image: bytes, offsets: r.scan.offsets }));
           else { pages.push(L.gradedSheetOps(t, o)); drawn++; }
         }

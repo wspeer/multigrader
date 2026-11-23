@@ -120,7 +120,7 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
     key.map((k, i) => (i % 2 ? k[0] : "")),
   ];
   const opts = [
-    { seed: 1, tilt: 4, noise: 6 },
+    { seed: 1, tilt: 4, noise: 6, finger: true },
     { seed: 2, rotate: 2, tilt: -3, noise: 8, light: 0.3, blur: 1 },
     { seed: 3, rotate: 1, outW: 3000, outH: 2250, tilt: 2, noise: 5 },
     { seed: 4, tilt: -7, bow: 2, noise: 6 },
@@ -341,6 +341,26 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
     assert((gtext.match(/GRADED COPY/g) || []).length === 5, "every page is labeled GRADED COPY");
     assert(/\(graded as F\)/.test(gtext), "an answer corrected in Review is noted on the copy (graded as F)");
     const dir = fs.mkdtempSync(path.join(require("os").tmpdir(), "mg-g-"));
+    // Fingers in the margins of a scan don't show up on any graded copy.
+    execFileSync("pdftoppm", ["-r", "40", "-png", gfile, path.join(dir, "m")]);
+    const margins = await page.evaluate(async (urls) => {
+      const out = [];
+      for (const u of urls) {
+        const img = new Image(); img.src = u; await img.decode();
+        const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
+        const ctx = c.getContext("2d"); ctx.drawImage(img, 0, 0);
+        const mm = img.width / 215.9;
+        const dark = (x0, y0, x1, y1) => {
+          const d = ctx.getImageData(x0 * mm, y0 * mm, (x1 - x0) * mm, (y1 - y0) * mm).data;
+          let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] < 200) n++;
+          return n;
+        };
+        out.push({ left: dark(0, 60, 10, 250), right: dark(206, 60, 215, 250), grid: dark(40, 70, 180, 160) });
+      }
+      return out;
+    }, fs.readdirSync(dir).filter((f) => f.startsWith("m") && f.endsWith(".png")).sort().map((f) => "data:image/png;base64," + fs.readFileSync(path.join(dir, f)).toString("base64")));
+    assert(margins.length === 5 && margins.every((m) => m.left === 0 && m.right === 0), "no fingers (or anything else) in the margins of any graded copy");
+    assert(margins.every((m) => m.grid > 20), "the students' pencil marks are still there");
     execFileSync("pdftoppm", ["-r", "100", "-f", "1", "-l", "1", "-png", gfile, path.join(dir, "g")]);
     const g1 = fs.readdirSync(dir).find((f) => f.endsWith(".png"));
     if (SHOTS) fs.copyFileSync(path.join(dir, g1), path.join(SHOTS, "graded-copy.png"));

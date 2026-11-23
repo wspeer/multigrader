@@ -205,6 +205,15 @@ window.makePhoto = async function (svg, test, answers, cs) {
   }
   const vrow = L.computeLayout(test).versionRow;
   if (vrow && cs.version) for (const b of vrow.bubbles) if (b.label === cs.version) pencil(pctx, k, b.cx, b.cy, L.BUBBLE_R * 0.95, rand, 0.9);
+  if (cs.finger) {
+    // Fingers holding the sheet: skin-coloured blobs in the left and right margins.
+    for (const [cx, cy, rx, ry] of [[3, 150, 10, 17], [3, 185, 9, 15], [213, 120, 9, 15]]) {
+      const g = pctx.createRadialGradient(cx * k, cy * k, 0, cx * k, cy * k, ry * k);
+      g.addColorStop(0, "#d9a27e"); g.addColorStop(1, "#b97c5c");
+      pctx.fillStyle = g;
+      pctx.beginPath(); pctx.ellipse(cx * k, cy * k, rx * k, ry * k, 0, 0, Math.PI * 2); pctx.fill();
+    }
+  }
   const outW = cs.outW || 2250, outH = cs.outH || 3000;
   const pw = page.width, ph = page.height;
   const s = Math.min(outW / pw, outH / ph) * (cs.fill || 0.88);
