@@ -166,6 +166,7 @@ node tests/e2e.js                 # class → test → print → fill + photogra
 node tests/e2e-versions.js        # versions, either / all-required keys, missing version bubble
 node tests/latex-test.js          # finding and reordering questions in .tex files
 node tests/e2e-latex.js           # upload .tex → key from \CorrectChoice → shuffle → download
+node tests/print-test.js          # one page per sheet even when the printer forces margins
 ```
 
 ## Deploying

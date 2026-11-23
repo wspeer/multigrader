@@ -817,7 +817,7 @@
             <details class="help">
               <summary>Printing tips</summary>
               <ul>
-                <li>Letter paper, portrait. Any scaling ("fit to page", margins) is fine; the scanner finds the four corner squares.</li>
+                <li>Letter paper, portrait. Each sheet shrinks to fit if your browser or printer adds margins, and that scaling is fine: the scanner finds the four corner squares.</li>
                 <li>Turn off the browser's "Headers and footers" option for a cleaner page.</li>
                 <li>Each sheet's code strip identifies the test <em>and</em> the student, so sheets can be scanned in any order, upside down, or mixed with other tests.</li>
                 <li>Reprinting a student's sheet gives the same code, so either copy can be scanned.</li>
