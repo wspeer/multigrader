@@ -24,8 +24,11 @@
     return { w, h, g };
   }
 
+  /* Shrink large images by a whole factor for marker detection, but never
+   * below maxDim: webcam frames (1280–1920 px) are used at full resolution,
+   * since a sheet held at arm's length has small corner squares. */
   function downscale(G, maxDim) {
-    const s = Math.max(1, Math.ceil(Math.max(G.w, G.h) / maxDim));
+    const s = Math.max(1, Math.floor(Math.max(G.w, G.h) / maxDim));
     if (s === 1) return { img: G, scale: 1 };
     const w = Math.floor(G.w / s), h = Math.floor(G.h / s);
     const out = new Uint8ClampedArray(w * h);
@@ -92,7 +95,7 @@
 
   /* ---------------- marker detection ---------------- */
 
-  function threshold(G) {
+  function threshold(G, k) {
     const { w, h, g } = G;
     const W = w + 1;
     const integ = new Uint32Array(W * (h + 1));
@@ -111,7 +114,7 @@
         const x0 = Math.max(0, x - r), x1 = Math.min(w, x + r + 1);
         const sum = integ[y1 * W + x1] - integ[y0 * W + x1] - integ[y1 * W + x0] + integ[y0 * W + x0];
         const area = (y1 - y0) * (x1 - x0);
-        if (g[y * w + x] * area < sum * 0.78) dark[y * w + x] = 1;
+        if (g[y * w + x] * area < sum * k) dark[y * w + x] = 1;
       }
     }
     return dark;
@@ -164,9 +167,27 @@
     return { lab, area, sx, sy, minx, miny, maxx, maxy, count: next };
   }
 
-  function findMarkerCandidates(G) {
+  /* Corner markers, found at two darkness thresholds and merged: the stricter
+   * one keeps the thin white ring of small, blurry markers (a sheet held at
+   * arm's length from a laptop webcam) from filling in. */
+  /* Corner-marker candidates at the given darkness thresholds, merged.
+   * 0.78 suits most images; for small, blurry markers (a sheet held at arm's
+   * length from a 720p laptop webcam) the thin outer ring breaks up, and a
+   * more lenient threshold (0.9) closes it, or a stricter one (0.6) keeps the
+   * white gap from filling in. */
+  function findMarkerCandidates(G, ks = [0.78], into = []) {
+    const out = into;
+    for (const k of ks) {
+      for (const m of markersAt(G, k)) {
+        if (!out.some((o) => Math.hypot(o.x - m.x, o.y - m.y) < Math.max(o.size, m.size) * 0.5)) out.push(m);
+      }
+    }
+    return out;
+  }
+
+  function markersAt(G, k) {
     const { w, h } = G;
-    const dark = threshold(G);
+    const dark = threshold(G, k);
     const C = components(dark, w, h);
     const out = [];
     for (let l = 1; l < C.count; l++) {
@@ -437,22 +458,35 @@
   function scan(imageData, opts = {}) {
     const t0 = Date.now();
     const G = imageData.g ? imageData : toGray(imageData);
-    const { img: S, scale } = downscale(G, opts.detectMaxDim || 1200);
-    const cands = findMarkerCandidates(S).map((m) => refineMarker(G, { x: m.x * scale + (scale - 1) / 2, y: m.y * scale + (scale - 1) / 2, size: m.size * scale }));
-    const base = { markers: cands, width: G.w, height: G.h };
-    if (cands.length < 4) return { ...base, status: "no-sheet", ms: Date.now() - t0 };
-    const quads = candidateQuads(cands).slice(0, 8);
-    let found = null;
-    for (const q of quads) {
-      for (let rot = 0; rot < 4 && !found; rot++) {
-        const dst = [0, 1, 2, 3].map((i) => [q[(i + rot) % 4].x, q[(i + rot) % 4].y]);
-        const H = solveHomography(PAGE_CORNERS, dst);
-        if (!H) continue;
-        const code = readCode(G, H);
-        if (code) found = { H, code, corners: dst };
+    const { img: S, scale } = downscale(G, opts.detectMaxDim || 1280);
+    const toFull = (m) => refineMarker(G, { x: m.x * scale + (scale - 1) / 2, y: m.y * scale + (scale - 1) / 2, size: m.size * scale });
+    const locate = (cands) => {
+      if (cands.length < 4) return { found: null, quads: [] };
+      const quads = candidateQuads(cands).slice(0, 8);
+      for (const q of quads) {
+        for (let rot = 0; rot < 4; rot++) {
+          const dst = [0, 1, 2, 3].map((i) => [q[(i + rot) % 4].x, q[(i + rot) % 4].y]);
+          const H = solveHomography(PAGE_CORNERS, dst);
+          if (!H) continue;
+          const code = readCode(G, H);
+          if (code) return { found: { H, code, corners: dst }, quads };
+        }
       }
-      if (found) break;
+      return { found: null, quads };
+    };
+    // Usual threshold first; only if that doesn't find the sheet, try the others.
+    const raw = findMarkerCandidates(S, [0.78]);
+    let cands = raw.map(toFull);
+    let { found, quads } = locate(cands);
+    if (!found) {
+      const n0 = raw.length;
+      findMarkerCandidates(S, [0.9, 0.6], raw);
+      if (raw.length > n0) {
+        cands = cands.concat(raw.slice(n0).map(toFull));
+        ({ found, quads } = locate(cands));
+      }
     }
+    const base = { markers: cands, width: G.w, height: G.h };
     if (!found) return { ...base, status: quads.length ? "no-code" : "no-sheet", ms: Date.now() - t0 };
     const { H, code, corners } = found;
     const res = { ...base, corners, H, testCode: code.testCode, sheetCode: code.sheetCode };

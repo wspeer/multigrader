@@ -1397,13 +1397,21 @@
       cam.stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
       const v = $("#video");
       if (!v) { stopCamera(); return; }
+      // Show the video before playing: Safari may not deliver frames from a
+      // video that's hidden when it starts.
+      viewScanControls(true);
+      v.muted = true;
+      v.setAttribute("playsinline", "");
       v.srcObject = cam.stream;
       await v.play();
+      // Wait until the first frame's size is known.
+      for (let i = 0; i < 50 && !v.videoWidth; i++) await new Promise((r) => setTimeout(r, 100));
       const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
       const cur = cam.stream.getVideoTracks()[0].getSettings().deviceId;
       $("#cam-select").innerHTML = devs.map((d, i) => `<option value="${d.deviceId}" ${d.deviceId === cur ? "selected" : ""}>${esc(d.label || "Camera " + (i + 1))}</option>`).join("");
       viewScanControls(true);
-      $("#video-wrap").style.aspectRatio = `${v.videoWidth} / ${v.videoHeight}`;
+      if (v.videoWidth) $("#video-wrap").style.aspectRatio = `${v.videoWidth} / ${v.videoHeight}`;
+      cam.res = v.videoWidth ? `${v.videoWidth}×${v.videoHeight}` : "";
       cam.running = true;
       cam.lastSig = null; cam.committed = null;
       setStatus("Looking for a sheet…");
@@ -1461,9 +1469,15 @@
     if (nowMs - cam.lastSeen > 1200) cam.committed = null;
     if (cam.committed) return; // keep the last result on screen until the sheet is removed
     if (res.status === "unknown-test") setStatus(`This sheet is for a test that isn't on this device (test ${res.testCode}). Import it from <a href="#/data">Data</a>.`, "warn");
-    else if (res.status === "no-code") setStatus("Sheet found. Hold it flat and fully in view…");
+    else if (res.status === "no-code") setStatus("Sheet found. Hold it flat, steady and fully in view…");
     else if (res.status === "layout-error") setStatus("This test's format can't be laid out on a sheet.", "bad");
-    else setStatus("Looking for a sheet… (all four corner squares need to be visible)");
+    else {
+      // Say how many corner squares it can see, so it's clear what to adjust.
+      const n = Math.min(4, (res.markers || []).length);
+      setStatus(`Looking for a sheet… <span class="muted small">corner squares seen: ${n} of 4${cam.res ? ` · camera ${cam.res}` : ""}</span><br><span class="muted small">${n === 0
+        ? "Hold the sheet so it fills most of the picture, with even light (no glare)."
+        : "Make sure all four corner squares are in the picture, then hold it still."}</span>`);
+    }
   }
 
   function drawOverlay(res, w, h) {

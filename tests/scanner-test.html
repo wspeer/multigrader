@@ -187,6 +187,9 @@ window.CASES = [
   { name: "no sheet in view", seed: 13, sections: SECTIONS_A, outW: 1920, outH: 1080, noSheet: true, expectFail: true },
   { name: "versions A-D, phone photo", seed: 14, sections: SECTIONS_B, versions: 4, outW: 2250, outH: 3000, tilt: -5, persp: 0.03, noise: 8, blur: 1, jpeg: 0.8 },
   { name: "versions, webcam, version left blank", seed: 15, sections: SECTIONS_A, versions: 3, versionBlank: true, outW: 1920, outH: 1080, tilt: 3, noise: 6, jpeg: 0.8, fill: 0.97 },
+  { name: "laptop webcam 720p, sheet held at arm's length", seed: 16, sections: SECTIONS_A, outW: 1280, outH: 720, fill: 0.62, tilt: 3, persp: 0.03, noise: 7, blur: 0.8, jpeg: 0.75, light: 0.25 },
+  { name: "laptop webcam 720p, sheet farther away", seed: 17, sections: SECTIONS_B, outW: 1280, outH: 720, fill: 0.5, tilt: -4, noise: 6, blur: 0.6, jpeg: 0.8 },
+  { name: "laptop webcam 720p, sheet held sideways", seed: 18, sections: SECTIONS_A, outW: 1280, outH: 720, fill: 0.75, rotate: 1, tilt: 2, noise: 6, blur: 0.7, jpeg: 0.8 },
   { name: "small in frame (far away)", seed: 8, sections: SECTIONS_A, outW: 1920, outH: 1080, fill: 0.6, tilt: 5, noise: 5 },
 ];
 
@@ -204,7 +207,7 @@ window.makePhoto = async function (svg, test, answers, cs) {
   if (vrow && cs.version) for (const b of vrow.bubbles) if (b.label === cs.version) pencil(pctx, k, b.cx, b.cy, L.BUBBLE_R * 0.95, rand, 0.9);
   const outW = cs.outW || 2250, outH = cs.outH || 3000;
   const pw = page.width, ph = page.height;
-  const s = Math.min(outW / pw, outH / ph) * 0.88;
+  const s = Math.min(outW / pw, outH / ph) * (cs.fill || 0.88);
   const ang = ((cs.rotate || 0) * 90 + (cs.tilt || 0)) * Math.PI / 180;
   const corners = [[-pw / 2, -ph / 2], [pw / 2, -ph / 2], [pw / 2, ph / 2], [-pw / 2, ph / 2]].map(([x, y]) => [
     outW / 2 + (x * Math.cos(ang) - y * Math.sin(ang)) * s + (rand() - 0.5) * 0.03 * outW,

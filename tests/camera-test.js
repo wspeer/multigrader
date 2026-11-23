@@ -50,7 +50,7 @@ function assert(c, m) { if (!c) throw new Error("ASSERT: " + m); console.log("  
   const answers = ["T", "F", "F", "T", "F", ..."ABCDEABCDEABCDA".split("")]; // 2 wrong → 18/20
   const helper = await ctx.newPage();
   await helper.goto(base + "/tests/scanner-test.html");
-  const url = await helper.evaluate(([svg, t, a]) => window.makePhoto(svg, t, a, { seed: 3, outW: 1280, outH: 720, rotate: 1, tilt: 4, noise: 5, blur: 0.7 }), [made.svg, made.test, answers]);
+  const url = await helper.evaluate(([svg, t, a]) => window.makePhoto(svg, t, a, { seed: 3, outW: 1280, outH: 720, fill: 0.62, tilt: 4, noise: 6, blur: 0.8, light: 0.25 }), [made.svg, made.test, answers]);
   await ctx.close();
   const jpg = path.join(tmp, "frame.jpg");
   fs.writeFileSync(jpg, Buffer.from(url.split(",")[1], "base64"));

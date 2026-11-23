@@ -176,7 +176,7 @@ tests/            synthetic scanner tests + end-to-end test (Playwright)
 Run the tests (needs Node and Playwright):
 
 ```bash
-node tests/run-scanner-tests.js   # 15 synthetic photos: tilt, rotation, curl, shadow, blur, low-res…
+node tests/run-scanner-tests.js   # 18 synthetic photos: tilt, rotation, curl, shadow, blur, laptop webcam…
 node tests/e2e.js                 # class → test → print → fill + photograph → scan → results
 node tests/e2e-versions.js        # versions, either / all-required keys, missing version bubble
 node tests/latex-test.js          # finding and reordering questions in .tex files
