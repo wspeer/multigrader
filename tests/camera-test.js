@@ -68,7 +68,13 @@ function assert(c, m) { if (!c) throw new Error("ASSERT: " + m); console.log("  
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
-  await page.goto(base + "/#/scan");
+  // Scan from inside the test (its "3 · Scan" tab).
+  await page.goto(base + `/#/test/${made.test.id}/build`);
+  await page.waitForSelector(".subnav");
+  await page.click(".subnav a:has-text('3 · Scan')");
+  await page.waitForSelector("#cam-start");
+  assert((await page.textContent(".subnav a.active")).trim() === "3 · Scan" && (await page.textContent("#th-title")).trim() === "Camera quiz", "3 · Scan stays inside the test (tabs and title still shown)");
+  assert(/0 of 1/.test(await page.textContent("#scan-progress")), "progress line: 0 of 1 students scanned");
   await page.click("#cam-start");
   const t0 = Date.now();
   try {
@@ -84,6 +90,10 @@ function assert(c, m) { if (!c) throw new Error("ASSERT: " + m); console.log("  
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "camera-ok.png") });
   const n = await page.evaluate(() => MGStore.db.scans.length);
   assert(n === 1, "one scan saved (not re-recorded while the sheet stays in view)");
+  assert(/1 of 1/.test(await page.textContent("#scan-progress")), "progress line updates: 1 of 1 students scanned");
+  await page.click("text=See results →");
+  await page.waitForSelector(".stats");
+  assert(page.url().endsWith(`/#/test/${made.test.id}/results`) && (await page.textContent(".subnav a.active")).trim() === "4 · Results", "See results → goes straight to this test's results");
   assert(errors.length === 0, "no page errors " + errors.join(" | "));
   await ctx.close();
   srv.close();

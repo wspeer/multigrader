@@ -354,3 +354,4 @@ button.resp.other { min-width: 0; color: var(--muted); }
 .who-name:hover { border-color: var(--brand); color: var(--brand); }
 .stat-p { font-size: 1rem; font-weight: 650; color: var(--brand); font-variant-numeric: tabular-nums; min-height: 1.2em; }
 .stat-p.warn-txt { color: var(--warn); font-size: 0.85rem; }
+.scan-progress-row { display: flex; align-items: center; gap: 12px; margin: -4px 0 14px; flex-wrap: wrap; }

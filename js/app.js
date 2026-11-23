@@ -137,6 +137,7 @@
       if (!t) { location.hash = "#/tests"; return; }
       const sub = parts[2] || "build";
       if (sub === "print") viewPrint(t);
+      else if (sub === "scan") viewScan(t);
       else if (sub === "results") viewResults(t);
       else viewBuild(t);
     } else if (view === "classes") viewClasses(parts[1]);
@@ -219,7 +220,7 @@
         <nav class="subnav">
           <a href="#/test/${t.id}/build" class="${sub === "build" ? "active" : ""}">1 · Build</a>
           <a href="#/test/${t.id}/print" class="${sub === "print" ? "active" : ""}">2 · Print</a>
-          <a href="#/scan" class="">3 · Scan</a>
+          <a href="#/test/${t.id}/scan" class="${sub === "scan" ? "active" : ""}">3 · Scan</a>
           <a href="#/test/${t.id}/results" class="${sub === "results" ? "active" : ""}">4 · Results</a>
         </nav>
       </div>`;
@@ -1499,10 +1500,16 @@
   const cam = { stream: null, running: false, timer: null, lastSig: null, committed: null, lastSeen: 0, audio: null, busy: false };
   const session = []; // scans made since the page was opened
 
-  function viewScan() {
+  /* Scan page. With a test (from its 3 · Scan tab) it stays inside that test,
+   * showing its progress; any test's sheets are still recorded. */
+  let scanTest = null;
+  function viewScan(t) {
+    scanTest = t || null;
     const secure = window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
     main.innerHTML = `
-      <div class="page-head"><h1>Scan</h1></div>
+      ${t ? `${testHeader(t, "scan")}
+        <div class="scan-progress-row"><span id="scan-progress"></span><span class="spacer"></span><a class="btn" href="#/test/${t.id}/results">See results →</a></div>`
+        : `<div class="page-head"><h1>Scan</h1></div>`}
       <div class="scan-grid">
         <section class="card scan-cam">
           <div class="scan-controls">
@@ -1519,7 +1526,7 @@
             <canvas id="overlay"></canvas>
             <div id="flash" class="flash"></div>
           </div>
-          <div id="scan-status" class="scan-status">Any sheet from any of your tests can be scanned here, in any order; each sheet's code tells MultiGrader which test and student it is.</div>
+          <div id="scan-status" class="scan-status">${t ? `Scan the sheets for <strong>${esc(t.title)}</strong>, in any order. (A sheet from another test is recorded for that test.)` : "Any sheet from any of your tests can be scanned here, in any order; each sheet's code tells MultiGrader which test and student it is."}</div>
           <details class="help">
             <summary>Tips for clean scans</summary>
             <ul>
@@ -1541,6 +1548,21 @@
     $("#cam-select").onchange = (e) => startCamera(e.target.value);
     $("#photo-in").onchange = (e) => scanFiles([...e.target.files]).then(() => (e.target.value = ""));
     renderSessionList();
+  }
+
+  /* "12 of 24 students scanned" for the test whose Scan tab is open. */
+  function updateScanProgress() {
+    const el = $("#scan-progress");
+    if (!el || !scanTest) return;
+    const t = St.getTest(scanTest.id);
+    if (!t) return;
+    const roster = testRoster(t);
+    const scans = St.scansFor(t);
+    const done = new Set(scans.map((s) => s.studentId).filter(Boolean));
+    const unmatched = scans.filter((s) => !s.studentId).length;
+    el.innerHTML = roster.length
+      ? `<strong>${roster.filter((x) => done.has(x.student.id)).length} of ${roster.length}</strong> students scanned${unmatched ? ` · <span class="warn-txt">${unmatched} unmatched blank sheet${unmatched === 1 ? "" : "s"}</span>` : ""}`
+      : `<strong>${scans.length}</strong> sheet${scans.length === 1 ? "" : "s"} scanned`;
   }
 
   function viewScanControls(on) {
@@ -1765,6 +1787,7 @@
   }
 
   function renderSessionList() {
+    updateScanProgress();
     const el = $("#scan-list");
     if (!el) return;
     el.innerHTML = session.length ? `<ul class="scan-items">${session.map((e) => `
