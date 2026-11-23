@@ -184,6 +184,7 @@ node tests/e2e-latex.js           # upload .tex → key from \CorrectChoice → 
 node tests/pdf-test.js            # PDF download: page size, text, every page scans (needs poppler-utils)
 node tests/roster-test.js         # roster text formats (CSV/spreadsheet/OCR lines, Form)
 node tests/e2e-roster.js          # roster import: text, duplicates, screenshot via file and paste
+node tests/camera-test.js         # live camera scanning with a fake webcam (needs ffmpeg)
 ```
 
 ## Deploying
