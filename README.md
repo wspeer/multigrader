@@ -23,7 +23,9 @@ stored in your browser on your device.
    A tag on each multi-letter row switches between the two.
 3. **Print.** One sheet per student with their name printed on it, plus optional
    blank sheets (the student writes a name, and you match it after scanning) and an
-   answer-key sheet you can scan to double-check the key.
+   answer-key sheet you can scan to double-check the key. Print directly, or use
+   **⬇ Download PDF** for exact Letter-size pages; print those at *Actual size*.
+   The PDF is made in the browser, with no upload.
 4. **Scan.** Use *Start camera* (webcam, or a phone's back camera) and hold up
    sheets one after another. Each sheet beeps when it's recorded. Or take photos
    with the phone's camera app and grade a whole stack with *Scan photos…*.
@@ -150,10 +152,11 @@ scanner, so the two can't disagree.
 ```
 index.html        app shell
 styles.css
-js/layout.js      sheet geometry, ID code, SVG rendering
+js/layout.js      sheet geometry, ID code, shapes for SVG and PDF
 js/scanner.js     image → answers
 js/store.js       localStorage / IndexedDB data, grading, backup merge
 js/latex.js       find and reorder questions in a LaTeX file
+js/pdf.js         answer sheets as a PDF (vector, built-in Helvetica, no libraries)
 js/app.js         UI
 tests/            synthetic scanner tests + end-to-end test (Playwright)
 ```
@@ -167,6 +170,7 @@ node tests/e2e-versions.js        # versions, either / all-required keys, missin
 node tests/latex-test.js          # finding and reordering questions in .tex files
 node tests/e2e-latex.js           # upload .tex → key from \CorrectChoice → shuffle → download
 node tests/print-test.js          # one page per sheet even when the printer forces margins
+node tests/pdf-test.js            # PDF download: page size, text, every page scans (needs poppler-utils)
 ```
 
 ## Deploying

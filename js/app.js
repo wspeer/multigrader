@@ -64,6 +64,18 @@
   }
   window.addEventListener("beforeunload", () => { clearTimeout(saveTimer); St.save(); });
 
+  /* A readable, plain-ASCII file name from a title ("11.2–11.8" → "11.2-11.8",
+   * "José" → "Jose"); some browsers refuse download names with other characters. */
+  function safeFileName(title) {
+    const s = String(title || "")
+      .replace(/[‐-―−]/g, "-")
+      .normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .replace(/[^\x20-\x7e]/g, "")
+      .replace(/[\/\\:*?"<>|#%]+/g, " ")
+      .replace(/\s+/g, " ").trim();
+    return s || "test";
+  }
+
   function download(name, text, type) {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([text], { type: type || "text/plain" }));
@@ -88,6 +100,7 @@
   function route() {
     stopCamera();
     closeModal();
+    clearTimeout(previewTimer);
     const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
     const view = parts[0] || "tests";
     $$(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.nav === (view === "test" ? "tests" : view)));
@@ -769,8 +782,8 @@
   function updatePreview(t) {
     clearTimeout(previewTimer);
     previewTimer = setTimeout(() => {
-      const el = $("#preview");
-      if (!el) return;
+      const el = $("#preview"), note = $("#preview-note");
+      if (!el || !note) return; // left the Build page before the timer fired
       const cls = t.classIds.map(St.getClass).filter(Boolean)[0];
       el.innerHTML = L.renderSheetSVG(t, { testCode: t.code, sheetCode: 1, studentName: "Student Name", className: cls ? cls.name : "", date: fmtDate(t.date) });
       const lay = L.computeLayout(t);
@@ -812,11 +825,13 @@
             <label class="check"><input type="checkbox" id="p-key" ${sel.key ? "checked" : ""}/> Also print ${L.versionLabels(t).length > 1 ? "an answer-key sheet for each version" : "an answer-key sheet"} <span class="muted small">(scan it to double-check your key — it's never recorded as a student)</span></label>
             <div class="print-go">
               <button class="btn primary big" id="p-go" ${lay.error ? "disabled" : ""}>Print</button>
+              <button class="btn big" id="p-pdf" ${lay.error ? "disabled" : ""} title="Download the sheets as a PDF to print from your PDF viewer">⬇ Download PDF</button>
               <span id="p-count" class="muted"></span>
             </div>
             <details class="help">
               <summary>Printing tips</summary>
               <ul>
+                <li><strong>Download PDF</strong> gives exact Letter-size pages; print them from your PDF viewer at <em>Actual size</em> (100%). Good for printing many copies, sending to a copy room, or keeping a file of the sheets.</li>
                 <li>Letter paper, portrait. Each sheet shrinks to fit if your browser or printer adds margins, and that scaling is fine: the scanner finds the four corner squares.</li>
                 <li>Turn off the browser's "Headers and footers" option for a cleaner page.</li>
                 <li>Each sheet's code strip identifies the test <em>and</em> the student, so sheets can be scanned in any order, upside down, or mixed with other tests.</li>
@@ -845,6 +860,7 @@
       $("#p-count").textContent = `${n} sheet${n === 1 ? "" : "s"}`;
       $("#p-go").textContent = `Print ${n} sheet${n === 1 ? "" : "s"}`;
       $("#p-go").disabled = !!lay.error || n === 0;
+      $("#p-pdf").disabled = !!lay.error || n === 0;
       const first = jobs()[0];
       $("#preview").innerHTML = L.renderSheetSVG(t, {
         testCode: t.code, sheetCode: first ? 1 : 2,
@@ -856,26 +872,48 @@
     if (ps) ps.onchange = () => { sel.student = ps.value; update(); };
     $("#p-blanks").oninput = (e) => { sel.blanks = Math.max(0, Math.min(60, parseInt(e.target.value, 10) || 0)); update(); };
     $("#p-key").onchange = (e) => { sel.key = e.target.checked; update(); };
-    $("#p-go").onclick = () => {
+    /* The sheets to produce (assigning sheet codes, which are saved). */
+    const sheetOpts = () => {
       const date = fmtDate(t.date);
-      const pages = [];
+      const list = [];
       for (const j of jobs()) {
         const sh = St.sheetFor(t, j.student.id, j.cls.id);
-        pages.push(L.renderSheetSVG(t, { testCode: t.code, sheetCode: sh.code, studentName: St.studentName(j.student), className: j.cls.name, date }));
+        list.push({ testCode: t.code, sheetCode: sh.code, studentName: St.studentName(j.student), className: j.cls.name, date });
       }
       const blankCls = classes.length === 1 ? classes[0] : null;
       for (let i = 0; i < sel.blanks; i++) {
         const sh = St.newBlankSheet(t, blankCls && blankCls.id);
-        pages.push(L.renderSheetSVG(t, { testCode: t.code, sheetCode: sh.code, className: blankCls ? blankCls.name : "", date }));
+        list.push({ testCode: t.code, sheetCode: sh.code, className: blankCls ? blankCls.name : "", date });
       }
       if (sel.key) {
-        for (const v of vlabels) {
-          pages.push(L.renderSheetSVG(t, { testCode: t.code, sheetCode: L.SHEET_KEY, key: St.versionKey(t, v), version: vlabels.length > 1 ? v : null, date }));
-        }
+        for (const v of vlabels) list.push({ testCode: t.code, sheetCode: L.SHEET_KEY, key: St.versionKey(t, v), version: vlabels.length > 1 ? v : null, date });
       }
       t.updatedAt = St.now();
       St.save();
-      printPages(pages);
+      return list;
+    };
+    $("#p-go").onclick = () => printPages(sheetOpts().map((o) => L.renderSheetSVG(t, o)));
+    $("#p-pdf").onclick = async () => {
+      const btn = $("#p-pdf");
+      btn.disabled = true;
+      const label = btn.textContent;
+      btn.textContent = "Making PDF…";
+      try {
+        const blob = await MGPdf.sheetsToPDF(sheetOpts().map((o) => L.sheetOps(t, o)), { title: `${t.title} — answer sheets` });
+        const name = `${safeFileName(t.title)} - answer sheets.pdf`;
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        toast("PDF downloaded. Print it at <strong>Actual size</strong> (100%) for full-size sheets.");
+      } catch (e) {
+        alert("Couldn't make the PDF: " + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = label;
+      }
     };
     update();
   }
@@ -1010,7 +1048,7 @@
       }
       lines.push(["", "KEY", "", ...(hasV ? ["A"] : []), "", "", "", ...fk.map(quick)]);
       const csv = lines.map((l) => l.map((v) => /[",\n]/.test(v) ? `"${String(v).replace(/"/g, '""')}"` : v).join(",")).join("\n");
-      download(`${(t.title || "test").replace(/[^\w\- ]+/g, "").trim() || "test"} results.csv`, csv, "text/csv");
+      download(`${safeFileName(t.title)} results.csv`, csv, "text/csv");
     };
   }
 

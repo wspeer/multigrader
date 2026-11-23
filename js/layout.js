@@ -205,119 +205,125 @@
     return out;
   }
 
-  /* ---------------- SVG rendering ---------------- */
+  /* ---------------- drawing (shared by SVG and PDF) ---------------- */
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   }
 
-  function fiducialSVG([cx, cy]) {
-    const h = FID_SIZE / 2;
-    const u = FID_UNIT;
-    return (
-      `<rect x="${cx - h}" y="${cy - h}" width="${FID_SIZE}" height="${FID_SIZE}" fill="#000"/>` +
-      `<rect x="${cx - h + u}" y="${cy - h + u}" width="${5 * u}" height="${5 * u}" fill="#fff"/>` +
-      `<rect x="${cx - 1.5 * u}" y="${cy - 1.5 * u}" width="${3 * u}" height="${3 * u}" fill="#000"/>`
-    );
-  }
-
   /**
-   * Render one answer sheet as an SVG string sized to a Letter page.
-   * opts: { testCode, sheetCode, title, date, studentName, className,
+   * Everything on one answer sheet as a list of simple shapes, in mm on a
+   * Letter page (y down). Both the SVG and the PDF are drawn from this list,
+   * so they always match each other and the scanner.
+   *   { t: "rect", x, y, w, h, fill?, stroke?, sw?, rx? }
+   *   { t: "circle", cx, cy, r, fill?, stroke?, sw? }
+   *   { t: "line", pts: [[x, y], ...], stroke, sw }      (a polyline)
+   *   { t: "text", x, y, size, text, bold?, anchor?, fill? }  (y = baseline)
+   *
+   * opts: { testCode, sheetCode, title, date, studentName, className, version,
    *         key (array of accepted-label strings, to draw an answer key),
    *         fills (array of label strings to draw as filled — used in tests) }
    */
-  function renderSheetSVG(test, opts = {}) {
+  function sheetOps(test, opts = {}) {
     const layout = computeLayout(test);
-    const parts = [];
-    parts.push(
-      `<svg xmlns="http://www.w3.org/2000/svg" class="sheet-svg" viewBox="0 0 ${PAGE.w} ${PAGE.h}" width="${PAGE.w}mm" height="${PAGE.h}mm" font-family="Helvetica, Arial, sans-serif">`
-    );
-    parts.push(`<rect x="0" y="0" width="${PAGE.w}" height="${PAGE.h}" fill="#fff"/>`);
-    for (const k of ["tl", "tr", "br", "bl"]) parts.push(fiducialSVG(FIDUCIALS[k]));
+    const ops = [];
+    const rect = (x, y, w, h, o) => ops.push({ t: "rect", x, y, w, h, ...o });
+    const circle = (cx, cy, r, o) => ops.push({ t: "circle", cx, cy, r, ...o });
+    const line = (pts, stroke, sw) => ops.push({ t: "line", pts, stroke, sw });
+    const text = (x, y, size, str, o) => ops.push({ t: "text", x, y, size, text: String(str), ...o });
+
+    rect(0, 0, PAGE.w, PAGE.h, { fill: "#fff" });
+    for (const k of ["tl", "tr", "br", "bl"]) {
+      const [cx, cy] = FIDUCIALS[k];
+      const h = FID_SIZE / 2, u = FID_UNIT;
+      rect(cx - h, cy - h, FID_SIZE, FID_SIZE, { fill: "#000" });
+      rect(cx - h + u, cy - h + u, 5 * u, 5 * u, { fill: "#fff" });
+      rect(cx - 1.5 * u, cy - 1.5 * u, 3 * u, 3 * u, { fill: "#000" });
+    }
 
     // ID strip
-    const bits = encodeSheetCode(opts.testCode || 0, opts.sheetCode || 0);
-    bits.forEach((b, i) => {
-      if (b) {
-        parts.push(
-          `<rect x="${(CODE_X0 + i * CODE_CELL_W).toFixed(3)}" y="${CODE_Y - CODE_CELL_H / 2}" width="${CODE_CELL_W + 0.02}" height="${CODE_CELL_H}" fill="#000"/>`
-        );
-      }
+    encodeSheetCode(opts.testCode || 0, opts.sheetCode || 0).forEach((b, i) => {
+      if (b) rect(CODE_X0 + i * CODE_CELL_W, CODE_Y - CODE_CELL_H / 2, CODE_CELL_W + 0.02, CODE_CELL_H, { fill: "#000" });
     });
 
     // Header
     const isKey = opts.sheetCode === SHEET_KEY;
-    parts.push(`<text x="${AREA_LEFT}" y="31" font-size="5" font-weight="700">${esc(opts.title || test.title || "Untitled test")}</text>`);
-    if (opts.date) parts.push(`<text x="${AREA_RIGHT}" y="31" font-size="3.6" text-anchor="end" fill="#333">${esc(opts.date)}</text>`);
+    text(AREA_LEFT, 31, 5, opts.title || test.title || "Untitled test", { bold: true });
+    if (opts.date) text(AREA_RIGHT, 31, 3.6, opts.date, { anchor: "end", fill: "#333" });
     if (isKey) {
-      parts.push(`<text x="${AREA_LEFT}" y="42" font-size="7" font-weight="700">ANSWER KEY${opts.version ? " — VERSION " + esc(opts.version) : ""}</text>`);
+      text(AREA_LEFT, 42, 7, "ANSWER KEY" + (opts.version ? " — VERSION " + opts.version : ""), { bold: true });
     } else if (opts.studentName) {
-      parts.push(`<text x="${AREA_LEFT}" y="42" font-size="7" font-weight="700">${esc(opts.studentName)}</text>`);
+      text(AREA_LEFT, 42, 7, opts.studentName, { bold: true });
     } else {
-      parts.push(`<text x="${AREA_LEFT}" y="42" font-size="4.2">Name:</text>`);
-      parts.push(`<line x1="${AREA_LEFT + 13}" y1="42.5" x2="${AREA_LEFT + 95}" y2="42.5" stroke="#000" stroke-width="0.3"/>`);
+      text(AREA_LEFT, 42, 4.2, "Name:");
+      line([[AREA_LEFT + 13, 42.5], [AREA_LEFT + 95, 42.5]], "#000", 0.3);
     }
-    if (opts.className) parts.push(`<text x="${AREA_LEFT}" y="48.5" font-size="3.6" fill="#444">${esc(opts.className)}</text>`);
+    if (opts.className) text(AREA_LEFT, 48.5, 3.6, opts.className, { fill: "#444" });
 
     // Instructions box (right of header)
     const bx = 128, by = 36, bw = AREA_RIGHT - bx, bh = 14;
-    parts.push(`<rect x="${bx}" y="${by}" width="${bw}" height="${bh}" rx="1.5" fill="none" stroke="#999" stroke-width="0.25"/>`);
-    parts.push(`<text x="${bx + 3}" y="${by + 5}" font-size="3" fill="#222">Fill bubbles completely and darkly.</text>`);
-    parts.push(`<text x="${bx + 3}" y="${by + 10.5}" font-size="3" fill="#222">Right:</text>`);
-    parts.push(`<circle cx="${bx + 16}" cy="${by + 9.5}" r="1.9" fill="#222"/>`);
-    parts.push(`<text x="${bx + 22}" y="${by + 10.5}" font-size="3" fill="#222">Wrong:</text>`);
-    parts.push(`<circle cx="${bx + 36}" cy="${by + 9.5}" r="1.9" fill="none" stroke="#555" stroke-width="0.3"/>`);
-    parts.push(`<path d="M${bx + 34.8} ${by + 9.6} l0.9 1 l1.8 -2.2" fill="none" stroke="#222" stroke-width="0.45"/>`);
-    parts.push(`<circle cx="${bx + 41}" cy="${by + 9.5}" r="1.9" fill="none" stroke="#555" stroke-width="0.3"/>`);
-    parts.push(`<path d="M${bx + 39.9} ${by + 8.4} l2.2 2.2 M${bx + 42.1} ${by + 8.4} l-2.2 2.2" stroke="#222" stroke-width="0.45"/>`);
-    parts.push(`<text x="${bx + 45}" y="${by + 10.5}" font-size="3" fill="#222">Erase cleanly.</text>`);
+    rect(bx, by, bw, bh, { rx: 1.5, stroke: "#999", sw: 0.25 });
+    text(bx + 3, by + 5, 3, "Fill bubbles completely and darkly.", { fill: "#222" });
+    text(bx + 3, by + 10.5, 3, "Right:", { fill: "#222" });
+    circle(bx + 16, by + 9.5, 1.9, { fill: "#222" });
+    text(bx + 22, by + 10.5, 3, "Wrong:", { fill: "#222" });
+    circle(bx + 36, by + 9.5, 1.9, { stroke: "#555", sw: 0.3 });
+    line([[bx + 34.8, by + 9.6], [bx + 35.7, by + 10.6], [bx + 37.5, by + 8.4]], "#222", 0.45);
+    circle(bx + 41, by + 9.5, 1.9, { stroke: "#555", sw: 0.3 });
+    line([[bx + 39.9, by + 8.4], [bx + 42.1, by + 10.6]], "#222", 0.45);
+    line([[bx + 42.1, by + 8.4], [bx + 39.9, by + 10.6]], "#222", 0.45);
+    text(bx + 45, by + 10.5, 3, "Erase cleanly.", { fill: "#222" });
 
-    parts.push(`<line x1="${AREA_LEFT}" y1="54" x2="${AREA_RIGHT}" y2="54" stroke="#000" stroke-width="0.35"/>`);
+    line([[AREA_LEFT, 54], [AREA_RIGHT, 54]], "#000", 0.35);
 
-    if (layout.error) {
-      parts.push(`<text x="${PAGE.w / 2}" y="120" font-size="5" text-anchor="middle" fill="#b00">${esc(layout.error)}</text>`);
-    }
+    if (layout.error) text(PAGE.w / 2, 120, 5, layout.error, { anchor: "middle", fill: "#b00" });
+
+    const bubble = (b, filled) => {
+      if (filled) circle(b.cx, b.cy, BUBBLE_R - 0.1, { fill: "#111" });
+      else {
+        circle(b.cx, b.cy, BUBBLE_R, { stroke: "#333", sw: 0.35 });
+        text(b.cx, b.cy + 0.95, 2.6, b.label, { anchor: "middle", fill: "#8a8a8a" });
+      }
+    };
 
     // Version row: the student bubbles which version of the test they have.
     if (layout.versionRow) {
       const v = layout.versionRow;
-      parts.push(`<rect x="${(v.x - 3).toFixed(3)}" y="${v.cy - 5}" width="${(v.width + 5).toFixed(3)}" height="10" rx="2" fill="none" stroke="#777" stroke-width="0.3"/>`);
-      parts.push(`<text x="${(v.x + VERSION_LABEL_W - 2).toFixed(3)}" y="${v.cy + 1.2}" font-size="3.4" font-weight="700" text-anchor="end">VERSION</text>`);
-      for (const b of v.bubbles) {
-        if (opts.version === b.label) {
-          parts.push(`<circle cx="${b.cx.toFixed(3)}" cy="${b.cy}" r="${BUBBLE_R - 0.1}" fill="#111"/>`);
-        } else {
-          parts.push(
-            `<circle cx="${b.cx.toFixed(3)}" cy="${b.cy}" r="${BUBBLE_R}" fill="none" stroke="#333" stroke-width="0.35"/>` +
-              `<text x="${b.cx.toFixed(3)}" y="${(b.cy + 0.95).toFixed(3)}" font-size="2.6" text-anchor="middle" fill="#8a8a8a">${esc(b.label)}</text>`
-          );
-        }
-      }
+      rect(v.x - 3, v.cy - 5, v.width + 5, 10, { rx: 2, stroke: "#777", sw: 0.3 });
+      text(v.x + VERSION_LABEL_W - 2, v.cy + 1.2, 3.4, "VERSION", { bold: true, anchor: "end" });
+      for (const b of v.bubbles) bubble(b, opts.version === b.label);
     }
 
     const fills = opts.fills || (isKey ? opts.key : null) || [];
     for (const q of layout.questions) {
-      parts.push(
-        `<text x="${q.x + LABEL_W - 1.6}" y="${q.cy + 1.15}" font-size="3.2" font-weight="700" text-anchor="end">${q.num}</text>`
-      );
+      text(q.x + LABEL_W - 1.6, q.cy + 1.15, 3.2, q.num, { bold: true, anchor: "end" });
       const filled = fills[q.index] || "";
-      for (const b of q.bubbles) {
-        if (filled.includes(b.label)) {
-          parts.push(`<circle cx="${b.cx.toFixed(3)}" cy="${b.cy.toFixed(3)}" r="${BUBBLE_R - 0.1}" fill="#111"/>`);
-        } else {
-          parts.push(
-            `<circle cx="${b.cx.toFixed(3)}" cy="${b.cy.toFixed(3)}" r="${BUBBLE_R}" fill="none" stroke="#333" stroke-width="0.35"/>` +
-              `<text x="${b.cx.toFixed(3)}" y="${(b.cy + 0.95).toFixed(3)}" font-size="2.6" text-anchor="middle" fill="#8a8a8a">${esc(b.label)}</text>`
-          );
-        }
-      }
+      for (const b of q.bubbles) bubble(b, filled.includes(b.label));
     }
 
     const foot = isKey
       ? "Answer key — scan to check the key; it is never recorded as a student."
       : `MultiGrader · test ${String(opts.testCode || 0).padStart(5, "0")} · sheet ${opts.sheetCode || 0}`;
-    parts.push(`<text x="${PAGE.w / 2}" y="${PAGE.h - FID_INSET + 1}" font-size="2.6" text-anchor="middle" fill="#888">${esc(foot)}</text>`);
+    text(PAGE.w / 2, PAGE.h - FID_INSET + 1, 2.6, foot, { anchor: "middle", fill: "#888" });
+    return ops;
+  }
+
+  const n3 = (v) => (Math.round(v * 1000) / 1000).toString();
+
+  /* Render one answer sheet as an SVG string sized to a Letter page. */
+  function renderSheetSVG(test, opts = {}) {
+    const parts = [
+      `<svg xmlns="http://www.w3.org/2000/svg" class="sheet-svg" viewBox="0 0 ${PAGE.w} ${PAGE.h}" width="${PAGE.w}mm" height="${PAGE.h}mm" font-family="Helvetica, Arial, sans-serif">`,
+    ];
+    for (const o of sheetOps(test, opts)) {
+      const paint = `fill="${o.fill || "none"}"${o.stroke ? ` stroke="${o.stroke}" stroke-width="${o.sw}"` : ""}`;
+      if (o.t === "rect") parts.push(`<rect x="${n3(o.x)}" y="${n3(o.y)}" width="${n3(o.w)}" height="${n3(o.h)}"${o.rx ? ` rx="${o.rx}"` : ""} ${paint}/>`);
+      else if (o.t === "circle") parts.push(`<circle cx="${n3(o.cx)}" cy="${n3(o.cy)}" r="${n3(o.r)}" ${paint}/>`);
+      else if (o.t === "line") parts.push(`<polyline points="${o.pts.map((p) => n3(p[0]) + "," + n3(p[1])).join(" ")}" fill="none" stroke="${o.stroke}" stroke-width="${o.sw}" stroke-linecap="round" stroke-linejoin="round"/>`);
+      else if (o.t === "text") {
+        parts.push(`<text x="${n3(o.x)}" y="${n3(o.y)}" font-size="${o.size}"${o.bold ? ' font-weight="700"' : ""}${o.anchor && o.anchor !== "start" ? ` text-anchor="${o.anchor}"` : ""}${o.fill ? ` fill="${o.fill}"` : ""}>${esc(o.text)}</text>`);
+      }
+    }
     parts.push(`</svg>`);
     return parts.join("");
   }
@@ -346,5 +352,6 @@
     decodeSheetCode,
     codeCellCenters,
     renderSheetSVG,
+    sheetOps,
   };
 })(typeof window !== "undefined" ? window : globalThis);
