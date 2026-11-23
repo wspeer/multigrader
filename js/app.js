@@ -1103,7 +1103,7 @@
             <strong>Version</strong>
             <span class="ov-btns">${vlabels.map((v) => `<button class="ob ${g.version === v ? "on" : ""}" data-ver="${v}">${v}</button>`).join("")}</span>
             <span class="small">${scan.versionOverride ? `set by you (sheet read “${esc(readV || "blank")}”) <a href="#" id="ver-undo">undo</a>`
-              : g.versionInferred ? `<span class="warn-txt">${readV ? `two versions bubbled (${esc(readV)})` : "not bubbled"}; graded as ${g.version}, the best match. Click to change.</span>`
+              : g.versionInferred ? `<span class="warn-txt">${readV ? `two versions bubbled (${esc(readV)})` : "not bubbled"}; graded as ${g.version}, the best match. Click a letter to change it, or</span> <button class="btn tiny" id="ver-ok">✓ Confirm ${g.version}</button>`
               : `<span class="muted">as bubbled</span>`}</span>
           </div>` : ""}
           <div class="review-body">
@@ -1113,7 +1113,13 @@
               <p class="legend small"><span class="lg good"></span>correct <span class="lg bad"></span>wrong <span class="lg key"></span>correct answer <span class="lg flag"></span>check this</p>
             </div>
             <div class="review-list">
-              <p class="muted small">Click letters to correct what the scanner read (shift-click to mark more than one). Highlighted rows need a look.${hasV && g.version !== "A" ? ` Numbers are as printed on Version ${g.version}; “= A12” shows the matching Version A question.` : ""}</p>
+              ${(() => {
+                const n = St.flagCount(scan, g);
+                return n ? `<div class="check-bar"><span><strong>${n} to check</strong>, highlighted below. Compare with the scan, then fix the letter or click <em>✓ Looks right</em>.</span>
+                  <button class="btn small" id="ok-all">✓ Confirm all as read</button></div>`
+                  : Object.keys(scan.confirmed || {}).length || Object.keys(ov).length ? `<div class="check-bar done">✓ Everything has been checked.</div>` : "";
+              })()}
+              <p class="muted small">Click letters to correct what the scanner read (shift-click to mark more than one).${hasV && g.version !== "A" ? ` Numbers are as printed on Version ${g.version}; “= A12” shows the matching Version A question.` : ""}</p>
               ${lay.questions.map((q) => {
                 const i = q.index, it = g.byPos[i] || {};
                 const ki = St.keyInfo(it.key);
@@ -1125,7 +1131,9 @@
                   <span class="ov-mark">${it.correct === true ? "✓" : it.correct === false ? "✗" : ""}</span>
                   ${hasV && g.version !== "A" ? `<span class="muted small">= A${it.q + 1}</span>` : ""}
                   ${ki.letters.length > 1 ? `<span class="muted small">key ${esc(St.keyText(it.key))}${ki.all ? " (all)" : ""}</span>` : ""}
-                  <span class="ov-note small">${edited ? `edited (read “${esc(scan.responses[i] || "blank")}”) <a href="#" data-undo="${i}">undo</a>` : flag ? esc(FLAG_TEXT[flag] || flag) : ""}</span>
+                  <span class="ov-note small">${edited ? `edited (read “${esc(scan.responses[i] || "blank")}”) <a href="#" data-undo="${i}">undo</a>`
+                    : flag ? `${esc(FLAG_TEXT[flag] || flag)} <button class="btn tiny" data-ok="${i}" title="The scanner read this correctly">✓ Looks right</button>`
+                    : scan.confirmed && scan.confirmed[i] && scan.flags[i] ? `<span class="good-txt">checked ✓</span> <a href="#" data-unok="${i}">undo</a>` : ""}</span>
                 </div>`;
               }).join("")}
             </div>
@@ -1146,6 +1154,15 @@
       }));
       const vu = $("#ver-undo");
       if (vu) vu.onclick = (e) => { e.preventDefault(); scan.versionOverride = null; touch(); };
+      const vok = $("#ver-ok");
+      if (vok) vok.onclick = () => { scan.versionOverride = g.version; touch(); };
+      const okAll = $("#ok-all");
+      if (okAll) okAll.onclick = () => {
+        scan.confirmed = scan.confirmed || {};
+        for (let i = 0; i < scan.flags.length; i++) if (St.shownFlag(scan, g, i)) scan.confirmed[i] = true;
+        if (g.versionInferred) scan.versionOverride = g.version;
+        touch();
+      };
       $$(".ov-row").forEach((row) => {
         const i = +row.dataset.i;
         $$(".ob[data-c]", row).forEach((b) => (b.onclick = (e) => {
@@ -1160,6 +1177,10 @@
         }));
         const u = $("[data-undo]", row);
         if (u) u.onclick = (e) => { e.preventDefault(); delete ov[i]; touch(); };
+        const ok = $("[data-ok]", row);
+        if (ok) ok.onclick = () => { (scan.confirmed = scan.confirmed || {})[i] = true; touch(); };
+        const unok = $("[data-unok]", row);
+        if (unok) unok.onclick = (e) => { e.preventDefault(); delete scan.confirmed[i]; touch(); };
       });
     };
     render();

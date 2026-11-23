@@ -294,9 +294,11 @@
   }
 
   /* Flag to show for a sheet position, hiding "two bubbles" when the key
-   * actually requires several answers, and anything the teacher corrected. */
+   * actually requires several answers, and anything the teacher corrected or
+   * confirmed as read. */
   function shownFlag(scan, g, pos) {
     if (scan.overrides && scan.overrides[pos] != null) return null;
+    if (scan.confirmed && scan.confirmed[pos]) return null;
     const f = scan.flags[pos];
     if (f === "multiple" && keyInfo(g.byPos[pos] && g.byPos[pos].key).all) return null;
     return f || null;
@@ -327,6 +329,7 @@
       versionOffset: result.versionOffset,
       versionOverride: null,
       overrides: {},
+      confirmed: {}, // flagged questions the teacher checked and accepted as read
       scannedAt: now(),
       updatedAt: now(),
     });

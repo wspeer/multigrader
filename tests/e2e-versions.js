@@ -171,6 +171,11 @@ function assert(cond, msg) { if (!cond) throw new Error("ASSERT: " + msg); conso
   await page.waitForSelector(".ver-bar");
   await page.waitForTimeout(400);
   await shot("v3-review");
+  // Confirming the guessed version clears its flag without changing the grade.
+  await page.click("#ver-ok");
+  assert(!(await page.$(".ver-bar.flag")) && /^7\//.test((await page.textContent(".score-big")).trim()), "✓ Confirm B clears the version flag, still 7/10");
+  const cruzFlags = await page.evaluate((id) => { const t = MGStore.db.tests[0]; const s = MGStore.db.scans.find((x) => x.id === id); return MGStore.flagCount(s, MGStore.grade(t, s)); }, cruzScan);
+  assert(cruzFlags === 0, "Cruz no longer counts as 'to check'");
   await page.click(".ver-bar [data-ver='A']");
   const sc = await page.textContent(".score-big");
   assert(!/^7\//.test(sc.trim()), "choosing version A regrades Cruz: " + sc.trim());

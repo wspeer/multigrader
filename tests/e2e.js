@@ -177,6 +177,37 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   assert(before !== after, `override changes score (${before.trim()} → ${after.trim()})`);
   await page.click("#m-done");
 
+  // ---- confirming flagged answers ("to check") ----
+  // David Chen's sheet: both A and C bubbled on Q20 → flagged "two bubbles filled".
+  const flagged = await page.evaluate(() => {
+    const t = MGStore.db.tests[0];
+    const s = MGStore.db.scans.find((x) => MGStore.flagCount(x, MGStore.grade(t, x)) > 0);
+    return s && { id: s.id, n: MGStore.flagCount(s, MGStore.grade(t, s)) };
+  });
+  assert(flagged && flagged.n >= 1, `a scan has ${flagged && flagged.n} to check`);
+  await page.goto(base + `/#/test/${testId}/results`);
+  await page.waitForSelector(`[data-review='${flagged.id}']`);
+  const rowCheck = async () => page.$eval(`[data-review='${flagged.id}']`, (b) => (b.closest("tr").textContent.match(/(\d+) to check/) || [0, 0])[1]);
+  assert(+(await rowCheck()) === flagged.n, `results row says "${flagged.n} to check"`);
+  await page.click(`[data-review='${flagged.id}']`);
+  await page.waitForSelector(".check-bar");
+  const firstFlag = await page.$eval(".ov-row.flag", (r) => r.dataset.i);
+  const scoreBefore = await page.textContent(".score-big");
+  await page.click(`.ov-row[data-i='${firstFlag}'] [data-ok]`);
+  assert(!(await page.$(`.ov-row[data-i='${firstFlag}'].flag`)), "✓ Looks right clears that question's highlight");
+  assert((await page.textContent(`.ov-row[data-i='${firstFlag}']`)).includes("checked ✓"), "the row shows it was checked");
+  assert((await page.textContent(".score-big")) === scoreBefore, "confirming doesn't change the score");
+  await page.click(`.ov-row[data-i='${firstFlag}'] [data-unok]`);
+  assert(!!(await page.$(`.ov-row[data-i='${firstFlag}'].flag`)), "undo puts the flag back");
+  await page.click("#ok-all");
+  assert(!(await page.$(".ov-row.flag")) && /Everything has been checked/.test(await page.textContent(".check-bar")), "Confirm all as read clears every flag");
+  await page.click("#m-done");
+  await page.waitForSelector(`[data-review='${flagged.id}']`);
+  assert(+(await rowCheck()) === 0, "results row no longer says \"to check\"");
+  await page.reload();
+  await page.waitForSelector(`[data-review='${flagged.id}']`);
+  assert(+(await rowCheck()) === 0, "still checked after a reload");
+
   // ---- export / import round trip ----
   const json = await page.evaluate(() => MGStore.exportJSON());
   const page2 = await (await browser.newContext()).newPage();
