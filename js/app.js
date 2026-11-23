@@ -441,13 +441,109 @@
     ).join(" ");
   }
 
-  function shuffled(n) {
+  /* Random order of n questions; positions in `fixed` stay where they are. */
+  function shuffled(n, fixed) {
     const a = Array.from({ length: n }, (_, i) => i);
+    const free = a.filter((i) => !(fixed && fixed.has(i)));
     for (let tries = 0; tries < 5; tries++) {
-      for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
-      if (n < 2 || a.some((x, i) => x !== i)) break;
+      const vals = free.slice();
+      for (let i = vals.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [vals[i], vals[j]] = [vals[j], vals[i]]; }
+      free.forEach((pos, k) => (a[pos] = vals[k]));
+      if (free.length < 2 || free.some((pos) => a[pos] !== pos)) break;
     }
     return a;
+  }
+
+  /* Version A question numbers that must not move (1-based). */
+  function fixedSet(t) { return new Set((t.fixedQuestions || []).filter((x) => Number.isInteger(x))); }
+
+  function shuffleVersion(t, v) {
+    const fixed = fixedSet(t);
+    sectionRanges(t).forEach((r, si) => {
+      const local = new Set([...fixed].filter((x) => x >= r.start + 1 && x <= r.end + 1).map((x) => x - r.start - 1));
+      St.setSectionOrder(t, v, t.sections[si], shuffled(r.n, local));
+    });
+  }
+
+  /* --- LaTeX: find questions in the Version A file, write reordered versions --- */
+
+  function texCheck(t) {
+    const tex = ui(t).tex;
+    if (!tex) return null;
+    const qc = L.questionChoices(t);
+    const fk = St.flatKey(t);
+    const p = tex.parsed;
+    const out = { ok: !p.error && p.questions.length === qc.length, warnings: [], keyFromTex: [], keyDiffs: [] };
+    if (p.error) out.error = p.error;
+    else if (p.questions.length !== qc.length) out.error = `Found ${p.questions.length} question${p.questions.length === 1 ? "" : "s"} in the file, but this test has ${qc.length}. Check the list of what was found below; the question count and order must match the test's format.`;
+    if (!out.ok) return out;
+    p.questions.forEach((q, i) => {
+      if (q.choices && q.choices !== qc[i].length) out.warnings.push(`Q${i + 1} has ${q.choices} answer choices in the file, but the test format gives it ${qc[i].length} (${qc[i].join("")}).`);
+      if (q.correct.length) {
+        const letters = q.correct.map((ix) => qc[i][ix]).filter(Boolean).join("");
+        const k = St.makeKey(letters, q.correct.length > 1);
+        out.keyFromTex[i] = k;
+        if (k !== fk[i]) out.keyDiffs.push(i);
+      }
+    });
+    return out;
+  }
+
+  function downloadVersionTex(t, v) {
+    const tex = ui(t).tex;
+    const perm = St.versionMap(t, v);
+    const reordered = MGLatex.reorder(tex.text, tex.parsed, perm);
+    const rl = MGLatex.relabel(reordered, v);
+    const vk = St.versionKey(t, v);
+    const orderTxt = sectionRanges(t).filter((r) => r.n).map((r) => perm.slice(r.start, r.end + 1).map((m) => m + 1).join(" ")).join(" | ");
+    const keyTxt = vk.map((k, i) => `${i + 1}:${St.keyInfo(k).all ? "[" + St.keyInfo(k).letters + "]" : St.keyInfo(k).letters.length > 1 ? "(" + St.keyInfo(k).letters + ")" : k || "?"}`).join(" ");
+    const head = `% Version ${v}, made by MultiGrader from ${tex.name} on ${new Date().toLocaleDateString()}.\n` +
+      `% Question order (Version A numbers): ${orderTxt}\n` +
+      `% Version ${v} answer key: ${keyTxt}\n`;
+    const base = tex.name.replace(/\.tex$/i, "").replace(/[-_ ]?(version[-_ ]?)?A$/i, "");
+    download(`${base}-version-${v}.tex`, head + rl.text, "application/x-tex");
+    toast(rl.count ? `Downloaded Version ${v}. Changed “Version A” to “Version ${v}” in ${rl.count} place${rl.count > 1 ? "s" : ""}.`
+      : `Downloaded Version ${v}. No “Version A” label was found in the file; add one to your header so students know which version to bubble.`);
+  }
+
+  function texPanel(t, labels) {
+    const tex = ui(t).tex;
+    const chk = texCheck(t);
+    const fixed = (t.fixedQuestions || []).join(" ");
+    let body = "";
+    if (tex) {
+      const p = tex.parsed;
+      body += chk.ok
+        ? `<p class="good-txt small"><strong>${esc(tex.name)}</strong>: found all ${p.questions.length} questions (${p.mode === "exam" ? "exam class \\question" : "numbered list \\item"}) ✓</p>`
+        : `<div class="notice bad small"><strong>${esc(tex.name)}</strong>: ${esc(chk.error)}</div>`;
+      if (chk.ok && chk.warnings.length) body += `<div class="notice small">${chk.warnings.slice(0, 4).map(esc).join("<br>")}${chk.warnings.length > 4 ? `<br>…and ${chk.warnings.length - 4} more` : ""}</div>`;
+      if (chk.ok && chk.keyFromTex.some(Boolean)) {
+        const n = chk.keyFromTex.filter(Boolean).length;
+        body += chk.keyDiffs.length
+          ? `<div class="notice small">The file marks correct answers (\\CorrectChoice) on ${n} question${n > 1 ? "s" : ""}. They differ from your answer key on Q${chk.keyDiffs.map((i) => i + 1).join(", Q")}.
+              <button class="btn small" id="tex-usekey">Use the file's answers</button></div>`
+          : `<p class="good-txt small">The file's \\CorrectChoice answers match your key on all ${n} question${n > 1 ? "s" : ""} ✓</p>`;
+      }
+      if (p.questions.length) {
+        body += `<details class="help"><summary>Questions found in the file (${p.questions.length})</summary><ol class="tex-list">${p.questions.map((q) => `<li>${esc(q.preview || "(empty)")}${q.choices ? ` <span class="muted">· ${q.choices} choices</span>` : ""}</li>`).join("")}</ol></details>`;
+      }
+    }
+    return `
+      <div class="tex-box">
+        <div class="ver-head"><strong>From your LaTeX file</strong></div>
+        <p class="muted small">Upload the <code>.tex</code> file for Version A. MultiGrader finds the questions (<code>\\question</code> in the exam class, or <code>\\item</code> in a numbered <code>enumerate</code> list),
+          and for each version gives you a new <code>.tex</code> file with the questions in that version's order. That version's key is set automatically.
+          Page breaks and headings between questions stay where they are; answer choices, figures and solutions move with their question.</p>
+        <div class="btn-row">
+          <label class="btn" for="tex-in">${tex ? "Upload a different .tex…" : "Upload Version A .tex…"}</label>
+          <input type="file" id="tex-in" accept=".tex,text/x-tex,application/x-tex,text/plain" class="visually-hidden" />
+        </div>
+        ${body}
+        <div class="form-row tex-fixed">
+          <label class="grow">Keep in place when shuffling <span class="muted small">(Version A numbers, e.g. questions that share a figure)</span>
+            <input id="tex-fixed" value="${esc(fixed)}" placeholder="e.g. 12 13 14" inputmode="numeric" /></label>
+        </div>
+      </div>`;
   }
 
   function renderVersions(t) {
@@ -467,11 +563,13 @@
       ${labels.length < 2 ? `<p class="muted small">Use versions to give students the same questions in a different order. Each sheet gets a VERSION row for students to bubble, each sheet is graded with its version's key, and results and item analysis use Version A's question numbers.</p>` : `
       <p class="muted small">Version A uses the order above. For each other version, list the <strong>Version A question numbers in the order they appear on that version</strong>, or click Shuffle.
         Questions can move only within their own section, so every version uses the same answer sheet. Students bubble their version at the top of the sheet; if they forget, the sheet is graded as the version that fits best and flagged for you.</p>
+      ${texPanel(t, labels)}
       ${labels.slice(1).map((v) => `
         <div class="ver-block" data-v="${v}">
           <div class="ver-head"><strong>Version ${v}</strong>
             <button class="btn small" data-shuffle>Shuffle</button>
-            <button class="btn small ghost" data-same>Same as A</button></div>
+            <button class="btn small ghost" data-same>Same as A</button>
+            ${ui(t).tex ? `<span class="spacer"></span><button class="btn small primary" data-texdl ${texCheck(t).ok ? "" : "disabled"}>⬇ Version ${v} .tex</button>` : ""}</div>
           ${t.sections.map((s, si) => {
             const r = ranges[si];
             if (!r.n) return "";
@@ -483,6 +581,35 @@
           }).join("")}
           <div class="ver-key small"><span class="muted">Version ${v} key:</span> <span class="vk-list">${versionKeyText(t, v)}</span></div>
         </div>`).join("")}`}`;
+
+    const texIn = $("#tex-in");
+    if (texIn) texIn.onchange = async () => {
+      const f = texIn.files[0];
+      if (!f) return;
+      const text = await f.text();
+      ui(t).tex = { name: f.name, text, parsed: MGLatex.parse(text) };
+      renderVersions(t);
+    };
+    const fx = $("#tex-fixed");
+    if (fx) fx.oninput = () => {
+      const n = L.questionChoices(t).length;
+      t.fixedQuestions = [...new Set((fx.value.match(/\d+/g) || []).map(Number).filter((x) => x >= 1 && x <= n))];
+      saveSoon(t);
+    };
+    const uk = $("#tex-usekey");
+    if (uk) uk.onclick = () => {
+      const chk = texCheck(t);
+      const ranges = sectionRanges(t);
+      chk.keyFromTex.forEach((k, i) => {
+        if (!k) return;
+        const si = ranges.findIndex((r) => i >= r.start && i <= r.end);
+        const sec = t.sections[si];
+        sec.key = sec.key || [];
+        sec.key[i - ranges[si].start] = k;
+      });
+      saveSoon(t); renderKey(t); renderVersions(t);
+      toast("Answer key updated from the file's \\CorrectChoice answers.");
+    };
 
     const vc = $("#v-count");
     vc.onchange = () => {
@@ -518,9 +645,11 @@
         };
       });
       $("[data-shuffle]", blk).onclick = () => {
-        t.sections.forEach((sec) => St.setSectionOrder(t, v, sec, shuffled(Math.max(0, parseInt(sec.count, 10) || 0))));
+        shuffleVersion(t, v);
         saveSoon(t); renderVersions(t);
       };
+      const dl = $("[data-texdl]", blk);
+      if (dl) dl.onclick = () => downloadVersionTex(t, v);
       $("[data-same]", blk).onclick = () => {
         if (t.versionOrders) delete t.versionOrders[v];
         saveSoon(t); renderVersions(t);

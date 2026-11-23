@@ -309,3 +309,11 @@ details.help li { margin: 4px 0; }
 .vk code { letter-spacing: 0.06em; }
 .ver-bar { display: flex; align-items: center; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .ver-bar.flag { background: #fff6e3; }
+.tex-box { border: 1px dashed #c5cfdd; border-radius: 10px; padding: 12px 14px; margin: 12px 0 6px; background: #fafbfd; }
+.tex-box .notice { margin: 8px 0; }
+.tex-box .btn-row { margin: 6px 0; }
+.tex-list { margin: 6px 0 0; padding-left: 26px; font-size: 0.85rem; color: #3a4658; }
+.tex-list li { margin: 2px 0; }
+.tex-fixed { margin: 10px 0 0; }
+.ver-head { flex-wrap: wrap; }
+.ver-head .spacer { flex: 1; }

@@ -51,6 +51,32 @@ you can check it against your printed test.
 - If a student leaves the version blank (or bubbles two), the sheet is graded as
   the version that fits best and flagged. You can change the version in Review.
 - The answer-key sheet option prints one key sheet per version.
+- **Keep in place:** Version A question numbers listed here never move when
+  shuffling, for example questions that share a figure.
+
+#### Making the versions from your LaTeX file
+
+In the Versions card, **Upload Version A .tex…**. MultiGrader finds the
+questions: `\question` (also `\titledquestion` and `\bonusquestion`) inside
+`questions` in the exam class, or `\item` in top-level numbered `enumerate`
+lists, which may be spread over several lists. Click **Shuffle**, then
+**⬇ Version B .tex** to get the reordered file. That version's answer key is
+already set, and it's written as a comment at the top of the file.
+
+- Answer choices, figures, `solution` blocks and anything else inside a
+  question move with it. Page breaks and headings that sit between questions
+  (`\newpage`, `\clearpage`, `\pagebreak`, `\uplevel{…}`, `\fullwidth{…}`,
+  `\section{…}`) stay where they are.
+- "Version A" in the text, and `\newcommand{\version}{A}`, become the new
+  version letter.
+- If the file marks answers with `\CorrectChoice`, MultiGrader checks them
+  against your key and can fill the key in from the file.
+- The number of questions found must match the test's format; the list of
+  what was found is shown so you can check it. Answer choices aren't shuffled,
+  only questions.
+- The uploaded file is kept only until you leave the page. Comments, `verbatim`
+  and `\verb` are ignored when looking for questions. Questions pulled in with
+  `\input{…}` aren't seen, so upload a single combined file.
 - Results can be filtered by version.
 
 ### Question types
@@ -111,6 +137,7 @@ styles.css
 js/layout.js      sheet geometry, ID code, SVG rendering
 js/scanner.js     image → answers
 js/store.js       localStorage / IndexedDB data, grading, backup merge
+js/latex.js       find and reorder questions in a LaTeX file
 js/app.js         UI
 tests/            synthetic scanner tests + end-to-end test (Playwright)
 ```
@@ -121,6 +148,8 @@ Run the tests (needs Node and Playwright):
 node tests/run-scanner-tests.js   # 15 synthetic photos: tilt, rotation, curl, shadow, blur, low-res…
 node tests/e2e.js                 # class → test → print → fill + photograph → scan → results
 node tests/e2e-versions.js        # versions, either / all-required keys, missing version bubble
+node tests/latex-test.js          # finding and reordering questions in .tex files
+node tests/e2e-latex.js           # upload .tex → key from \CorrectChoice → shuffle → download
 ```
 
 ## Deploying
