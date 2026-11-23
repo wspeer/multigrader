@@ -194,6 +194,7 @@
   }
 
   function setSectionOrder(t, label, s, order) {
+    if (t.versionLocks && t.versionLocks[label]) return; // locked versions never change
     t.versionOrders = t.versionOrders || {};
     t.versionOrders[label] = t.versionOrders[label] || {};
     t.versionOrders[label][s.id] = order;

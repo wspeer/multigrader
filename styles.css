@@ -319,3 +319,5 @@ details.help li { margin: 4px 0; }
 .ver-head .spacer { flex: 1; }
 .tex-list .tex-break { display: block; border-top: 1px dashed #c5cfdd; margin: 6px 0 4px -26px; }
 .diff-list { margin: 6px 0 8px; padding-left: 20px; }
+.lock-pill { background: #eef3fd; color: var(--brand); }
+.ver-block.locked .ver-order { background: #f3f5f8; color: #4a5568; cursor: default; }

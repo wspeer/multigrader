@@ -84,6 +84,34 @@ function assert(cond, msg) { if (!cond) throw new Error("ASSERT: " + msg); conso
   assert(letters.join("") === vkey.join(""), "\\CorrectChoice in the new file matches version B's key");
   const toast = await page.textContent("#toast");
   assert(/Changed “Version A” to “Version B” in 2 places/.test(toast), "toast reports relabel");
+  // Undo, lock, unlock
+  const orderB = () => page.evaluate(() => MGStore.versionMap(MGStore.db.tests[0], "B").join(" "));
+  await page.click(".ver-block[data-v='B'] [data-shuffle]");
+  const afterOne = await orderB();
+  await page.click(".ver-block[data-v='B'] [data-shuffle]");
+  assert(!!(await page.$(".ver-block[data-v='B'] [data-undo]")), "Undo appears after Shuffle");
+  const afterTwo = await orderB();
+  assert(afterTwo !== afterOne, `each Shuffle gives a different order (${afterOne} → ${afterTwo})`);
+  await page.click(".ver-block[data-v='B'] [data-undo]");
+  assert((await orderB()) === afterOne, "Undo restores the previous order exactly");
+  await page.click(".ver-block[data-v='B'] [data-lock]");
+  const locked = await orderB();
+  assert(!(await page.$(".ver-block[data-v='B'] [data-shuffle]")) && !(await page.$(".ver-block[data-v='B'] [data-same]")), "locked: Shuffle and Same as A are gone");
+  assert(await page.$eval(".ver-block[data-v='B'] .ver-order", (i) => i.readOnly), "locked: order boxes are read-only");
+  await page.evaluate(() => { const t = MGStore.db.tests[0]; MGStore.setSectionOrder(t, "B", t.sections[1], [3, 2, 1, 0]); });
+  assert((await orderB()) === locked, "locked: the order can't be changed even programmatically");
+  await page.reload();
+  await page.waitForSelector(".ver-block[data-v='B'] .lock-pill");
+  assert((await orderB()) === locked, "lock survives a page reload");
+  page.once("dialog", (d) => d.dismiss());
+  await page.click(".ver-block[data-v='B'] [data-unlock]");
+  assert(!!(await page.$(".ver-block[data-v='B'] .lock-pill")), "cancelling Unlock keeps it locked");
+  page.once("dialog", (d) => d.accept());
+  await page.click(".ver-block[data-v='B'] [data-unlock]");
+  await page.waitForSelector(".ver-block[data-v='B'] [data-shuffle]");
+  assert(true, "Unlock (after confirming) brings Shuffle back");
+  await page.click(".ver-block[data-v='B'] [data-lock]");
+
   if (process.argv[2]) await page.screenshot({ path: path.join(process.argv[2], "latex-panel.png"), fullPage: true });
 
   // A key entered as "either" (e.g. shift-click) vs an all-required answer in the file.

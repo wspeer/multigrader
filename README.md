@@ -53,6 +53,11 @@ you can check it against your printed test.
 - The answer-key sheet option prints one key sheet per version.
 - **Keep in place:** Version A question numbers listed here never move when
   shuffling, for example questions that share a figure.
+- **Shuffle, Undo, Lock:** every Shuffle gives a new order, and **↶ Undo**
+  goes back one step. When you're happy with a version, click **🔒 Lock order**.
+  Shuffle, "Same as A" and editing are then turned off for that version (you
+  can still download its `.tex`). **Unlock…** asks for confirmation and warns
+  you if scanned sheets already use that version.
 
 #### Making the versions from your LaTeX file
 

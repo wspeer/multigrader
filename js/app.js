@@ -454,6 +454,16 @@
     return a;
   }
 
+  const verLocked = (t, v) => !!(t.versionLocks && t.versionLocks[v]);
+
+  /* Save a version's order so the next change can be undone. */
+  function rememberOrder(t, v, force) {
+    const u = ui(t).undo || (ui(t).undo = {});
+    if (!force && u[v] !== undefined) return;
+    const cur = t.versionOrders && t.versionOrders[v];
+    u[v] = cur ? JSON.parse(JSON.stringify(cur)) : null;
+  }
+
   /* Version A question numbers that must not move (1-based). */
   function fixedSet(t) { return new Set((t.fixedQuestions || []).filter((x) => Number.isInteger(x))); }
 
@@ -466,6 +476,15 @@
   /* Shuffle each section, keeping questions inside their group in the LaTeX
    * file (so none crosses a heading) and leaving "keep in place" ones alone. */
   function shuffleVersion(t, v) {
+    // Try a few times so Shuffle visibly changes the order whenever it can.
+    const before = St.versionMap(t, v).join(",");
+    for (let tries = 0; tries < 12; tries++) {
+      shuffleOnce(t, v);
+      if (St.versionMap(t, v).join(",") !== before) return;
+    }
+  }
+
+  function shuffleOnce(t, v) {
     const fixed = fixedSet(t);
     const blocks = texBlocks(t);
     sectionRanges(t).forEach((r, si) => {
@@ -611,11 +630,19 @@
       <p class="muted small">Version A uses the order above. For each other version, list the <strong>Version A question numbers in the order they appear on that version</strong>, or click Shuffle.
         Questions can move only within their own section, so every version uses the same answer sheet. Students bubble their version at the top of the sheet; if they forget, the sheet is graded as the version that fits best and flagged for you.</p>
       ${texPanel(t, labels)}
-      ${labels.slice(1).map((v) => `
-        <div class="ver-block" data-v="${v}">
+      ${labels.slice(1).map((v) => {
+        const vLocked = verLocked(t, v);
+        const canUndo = !vLocked && ui(t).undo && ui(t).undo[v] !== undefined;
+        return `
+        <div class="ver-block ${vLocked ? "locked" : ""}" data-v="${v}">
           <div class="ver-head"><strong>Version ${v}</strong>
-            <button class="btn small" data-shuffle>Shuffle</button>
-            <button class="btn small ghost" data-same>Same as A</button>
+            ${vLocked
+              ? `<span class="pill lock-pill">🔒 Order locked</span>
+                 <button class="btn small ghost" data-unlock>Unlock…</button>`
+              : `<button class="btn small" data-shuffle>Shuffle</button>
+                 ${canUndo ? `<button class="btn small ghost" data-undo title="Go back to the order before the last change">↶ Undo</button>` : ""}
+                 <button class="btn small ghost" data-same>Same as A</button>
+                 <button class="btn small" data-lock title="Keep this order: Shuffle and editing are turned off until you unlock">🔒 Lock order</button>`}
             ${ui(t).tex ? `<span class="spacer"></span><button class="btn small primary" data-texdl ${texCheck(t).ok ? "" : "disabled"}>⬇ Version ${v} .tex</button>` : ""}</div>
           ${t.sections.map((s, si) => {
             const r = ranges[si];
@@ -623,11 +650,12 @@
             const o = St.sectionOrder(t, v, s);
             return `<div class="ver-sec" data-si="${si}">
               <span class="ver-range">${v} ${r.start + 1}${r.n > 1 ? "–" + (r.end + 1) : ""}</span>
-              <input class="ver-order" value="${o.map((x) => x + r.start + 1).join(" ")}" spellcheck="false" autocomplete="off" inputmode="numeric" />
+              <input class="ver-order" value="${o.map((x) => x + r.start + 1).join(" ")}" spellcheck="false" autocomplete="off" inputmode="numeric" ${vLocked ? 'readonly title="Unlock this version to change its order"' : ""} />
               <span class="ver-msg small"></span></div>`;
           }).join("")}
           <div class="ver-key small"><span class="muted">Version ${v} key:</span> <span class="vk-list">${versionKeyText(t, v)}</span></div>
-        </div>`).join("")}`}`;
+        </div>`;
+      }).join("")}`}`;
 
     const texIn = $("#tex-in");
     if (texIn) texIn.onchange = async () => {
@@ -671,6 +699,8 @@
         const sec = t.sections[+row.dataset.si];
         const r = ranges[+row.dataset.si];
         const inp = $(".ver-order", row), msg = $(".ver-msg", row);
+        if (verLocked(t, v)) return;
+        inp.onfocus = () => rememberOrder(t, v);
         inp.oninput = () => {
           const nums = (inp.value.match(/\d+/g) || []).map(Number);
           const want = Array.from({ length: r.n }, (_, i) => r.start + 1 + i);
@@ -697,16 +727,41 @@
           }
         };
       });
-      $("[data-shuffle]", blk).onclick = () => {
-        shuffleVersion(t, v);
-        saveSoon(t); renderVersions(t);
-      };
       const dl = $("[data-texdl]", blk);
       if (dl) dl.onclick = () => downloadVersionTex(t, v);
-      $("[data-same]", blk).onclick = () => {
+      const on = (sel, fn) => { const b = $(sel, blk); if (b) b.onclick = fn; };
+      on("[data-shuffle]", () => {
+        rememberOrder(t, v, true);
+        shuffleVersion(t, v);
+        saveSoon(t); renderVersions(t);
+      });
+      on("[data-same]", () => {
+        rememberOrder(t, v, true);
         if (t.versionOrders) delete t.versionOrders[v];
         saveSoon(t); renderVersions(t);
-      };
+      });
+      on("[data-undo]", () => {
+        const prev = ui(t).undo[v];
+        t.versionOrders = t.versionOrders || {};
+        if (prev) t.versionOrders[v] = prev; else delete t.versionOrders[v];
+        delete ui(t).undo[v];
+        saveSoon(t); renderVersions(t);
+      });
+      on("[data-lock]", () => {
+        t.versionLocks = t.versionLocks || {};
+        t.versionLocks[v] = true;
+        if (ui(t).undo) delete ui(t).undo[v];
+        saveSoon(t); renderVersions(t);
+        toast(`Version ${v}'s order is locked. You can still download its .tex file.`);
+      });
+      on("[data-unlock]", () => {
+        const used = St.scansFor(t).filter((sc) => St.grade(t, sc).version === v).length;
+        const msg = `Unlock Version ${v} so its order can change?` +
+          (used ? `\n\n${used} scanned sheet${used > 1 ? "s are" : " is"} graded as Version ${v}. If you change the order, ${used > 1 ? "they" : "it"} will be regraded with the new order, which won't match the printed copies.` : "\n\nIf you've already printed or shared Version " + v + ", changing its order will make those copies not match the key.");
+        if (!confirm(msg)) return;
+        delete t.versionLocks[v];
+        saveSoon(t); renderVersions(t);
+      });
     });
   }
 
