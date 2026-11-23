@@ -926,6 +926,9 @@
       `${esc(label)} <span class="sort-arrow">${["⇅", "▲", "▼"][m]}</span>${note ? `<span class="sort-note">${note}</span>` : ""}</button>`;
   }
 
+  /* "Last, First" (or just the first name if there's no last name). */
+  const lastFirst = (s) => (s.last ? `${s.last}, ${s.first}` : s.first);
+
   function viewResults(t) {
     const classes = t.classIds.map(St.getClass).filter(Boolean);
     const vlabels = L.versionLabels(t);
@@ -979,12 +982,12 @@
           <tbody>
             ${(() => {
               const rowHTML = (r) => r.student ? `<tr>
-              <td>${esc(St.studentName(r.student))}</td>${classes.length > 1 ? `<td>${esc(r.cls.name)}</td>` : ""}${vcol(r)}
+              <td>${esc(lastFirst(r.student))}</td>${classes.length > 1 ? `<td>${esc(r.cls.name)}</td>` : ""}${vcol(r)}
               <td class="num">${fmtPts(r.g.score)}/${fmtPts(r.g.possible)}</td><td class="num"><strong>${pct(r.g.pct)}</strong></td>
               <td>${r.nflag ? `<span class="pill warn">${r.nflag} to check</span>` : ""}${Object.keys(r.scan.overrides || {}).length || r.scan.versionOverride ? `<span class="pill">edited</span>` : ""}</td>
               <td class="muted small">${fmtTime(r.scan.scannedAt)}</td>
               <td><button class="btn small" data-review="${r.scan.id}">Review</button></td></tr>` : `<tr class="unassigned">
-              <td><em>Blank sheet #${r.scan.sheetCode}</em> → <select data-assign="${r.scan.id}"><option value="">who is this?</option>${roster.map((x) => `<option value="${x.student.id}">${esc(St.studentName(x.student))}</option>`).join("")}</select></td>${classes.length > 1 ? "<td></td>" : ""}${vcol(r)}
+              <td><em>Blank sheet #${r.scan.sheetCode}</em> → <select data-assign="${r.scan.id}"><option value="">who is this?</option>${roster.map((x) => `<option value="${x.student.id}">${esc(lastFirst(x.student))}</option>`).join("")}</select></td>${classes.length > 1 ? "<td></td>" : ""}${vcol(r)}
               <td class="num">${fmtPts(r.g.score)}/${fmtPts(r.g.possible)}</td><td class="num"><strong>${pct(r.g.pct)}</strong></td>
               <td>${r.nflag ? `<span class="pill warn">${r.nflag} to check</span>` : ""}</td>
               <td class="muted small">${fmtTime(r.scan.scannedAt)}</td>
@@ -997,7 +1000,7 @@
               if (st && st.col === "name") list.sort((a, b) => (st.dir === 1 ? 1 : -1) * nameKey(a).localeCompare(nameKey(b)));
               return list.map(rowHTML).join("");
             })()}
-            ${missing.map((x) => `<tr class="missing"><td>${esc(St.studentName(x.student))}</td>${classes.length > 1 ? `<td>${esc(x.cls.name)}</td>` : ""}<td colspan="${ncols - 1 - (classes.length > 1 ? 1 : 0)}" class="muted">not scanned</td></tr>`).join("")}
+            ${missing.map((x) => `<tr class="missing"><td>${esc(lastFirst(x.student))}</td>${classes.length > 1 ? `<td>${esc(x.cls.name)}</td>` : ""}<td colspan="${ncols - 1 - (classes.length > 1 ? 1 : 0)}" class="muted">not scanned</td></tr>`).join("")}
           </tbody>
         </table></div>`}
       </section>
@@ -1036,7 +1039,7 @@
             const who = (i, c, ki) => {
               const match = (resp) => (c === "blank" ? !resp : c === "multiple" ? resp.length > 1 && !ki.all : ki.all ? resp.includes(c) : resp === c);
               const list = graded.filter((r) => r.g.items[i] && match(r.g.items[i].resp))
-                .map((r) => ({ r, name: r.student ? (r.student.last ? `${r.student.last}, ${r.student.first}` : r.student.first) : `Blank sheet #${r.scan.sheetCode}`, sort: r.student ? (r.student.last + " " + r.student.first).toLowerCase() : "~" + r.scan.sheetCode }))
+                .map((r) => ({ r, name: r.student ? lastFirst(r.student) : `Blank sheet #${r.scan.sheetCode}`, sort: r.student ? (r.student.last + " " + r.student.first).toLowerCase() : "~" + r.scan.sheetCode }))
                 .sort((a, b) => a.sort.localeCompare(b.sort));
               const what = c === "blank" ? "left it blank" : c === "multiple" ? "bubbled more than one answer" : ki.all ? `bubbled ${esc(c)}` : `answered ${esc(c)}`;
               return `<tr class="who-row"><td colspan="4"><div class="who">

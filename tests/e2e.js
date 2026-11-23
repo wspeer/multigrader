@@ -243,6 +243,7 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   // ---- students: sort by score ----
   const sOrder = () => page.$$eval("section.card:first-of-type table tbody tr:not(.missing)", (trs) => trs.map((tr) => [tr.cells[0].textContent.trim(), parseFloat(tr.querySelector("td.num strong").textContent)]));
   const s0 = await sOrder();
+  assert(s0.some((r) => r[0] === "Chen, David") && s0.some((r) => r[0] === "Garcia, Maria"), "Students table lists names as Last, First");
   assert(!(await page.$eval("#student-sort", (b) => b.classList.contains("on"))) && /⇅/.test(await page.textContent("#student-sort")), "Score header shows it's sortable (⇅) and starts unsorted");
   await page.click("#student-sort");
   const s1 = await sOrder();
@@ -254,7 +255,7 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   assert(JSON.stringify(await sOrder()) === JSON.stringify(s0), "3rd click: back to name order");
 
   // ---- students: sort by name (last name), and switching columns ----
-  const lastOf = (rows) => rows.filter((r) => !/Blank sheet/.test(r[0])).map((r) => r[0].split(" ").pop());
+  const lastOf = (rows) => rows.filter((r) => !/Blank sheet/.test(r[0])).map((r) => r[0].split(",")[0]);
   await page.click("#name-sort");
   const nm1 = lastOf(await sOrder());
   assert(nm1.join() === [...nm1].sort((a, b) => a.localeCompare(b)).join() && /A–Z/.test(await page.textContent("#name-sort")), "Student header: 1st click A–Z by last name (" + nm1.join(", ") + ")");
