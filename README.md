@@ -52,7 +52,7 @@ stored in your browser on your device.
      **✓ Looks right** if the scanner read it correctly, or **Confirm all as
      read**. The "to check" count then goes away.
    - Changing the key regrades everything.
-   - **⬇ Graded copies (PDF)** makes one page per student to hand back
+   - **⬇ Graded copies of all bubble sheets (PDF)** makes one page per student to hand back
      instead of their marked-up sheet: their answers filled in, a ring
      around each correct answer, ✓/✗, and their score. Graded copies have no
      corner squares or code strip, so they can't be scanned as answer sheets
