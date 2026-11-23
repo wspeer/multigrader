@@ -221,6 +221,19 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   await page.click("#item-sort");
   assert((await order()).map((r) => r[0]).join() === o0.map((r) => r[0]).join(), "3rd click: back to question order");
 
+  // ---- students: sort by score ----
+  const sOrder = () => page.$$eval("section.card:first-of-type table tbody tr:not(.missing)", (trs) => trs.map((tr) => [tr.cells[0].textContent.trim(), parseFloat(tr.querySelector("td.num strong").textContent)]));
+  const s0 = await sOrder();
+  assert(!(await page.$eval("#student-sort", (b) => b.classList.contains("on"))) && /⇅/.test(await page.textContent("#student-sort")), "Score header shows it's sortable (⇅) and starts unsorted");
+  await page.click("#student-sort");
+  const s1 = await sOrder();
+  assert(s1.every((r, k) => k === 0 || r[1] >= s1[k - 1][1]) && /lowest first/.test(await page.textContent("#student-sort")), "1st click: lowest score first, header says so (" + s1.map((r) => r[1] + "%").join(", ") + ")");
+  await page.click("#student-sort");
+  const s2 = await sOrder();
+  assert(s2.every((r, k) => k === 0 || r[1] <= s2[k - 1][1]) && /highest first/.test(await page.textContent("#student-sort")), "2nd click: highest score first");
+  await page.click("#student-sort");
+  assert(JSON.stringify(await sOrder()) === JSON.stringify(s0), "3rd click: back to name order");
+
   // ---- item analysis: who gave a particular answer ----
   const whoExpected = (q, c) => page.evaluate(([q, c]) => {
     const t = MGStore.db.tests[0];

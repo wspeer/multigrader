@@ -33,6 +33,14 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v6
 
+      # Browsers may cache the scripts for a while; tagging their URLs with
+      # this commit makes every deploy load fresh copies.
+      - name: Stamp script and stylesheet URLs with this version
+        run: |
+          v="${GITHUB_SHA::8}"
+          sed -i -E "s#(src|href)=\"(js/[^\"?]+\.js|styles\.css)\"#\1=\"\2?v=$v\"#g" index.html
+          grep -c "?v=$v" index.html
+
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v5
         with:

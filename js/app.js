@@ -916,6 +916,14 @@
    * RESULTS
    * ================================================================ */
 
+  /* A clickable column header that cycles: off → lowest first → highest first. */
+  function sortButton(id, label, mode, title) {
+    const m = mode || 0;
+    const note = ["", "lowest first", "highest first"][m];
+    return `<button type="button" class="th-sort ${m ? "on" : ""}" id="${id}" title="${esc(title)}" aria-label="${esc(label)}: ${note || "not sorted"}. ${esc(title)}">` +
+      `${esc(label)} <span class="sort-arrow">${["⇅", "▲", "▼"][m]}</span>${note ? `<span class="sort-note">${note}</span>` : ""}</button>`;
+  }
+
   function viewResults(t) {
     const classes = t.classIds.map(St.getClass).filter(Boolean);
     const vlabels = L.versionLabels(t);
@@ -965,20 +973,26 @@
         <h2>Students</h2>
         ${graded.length === 0 && missing.length === 0 ? `<p class="muted">Nothing scanned yet. Go to <a href="#/scan">Scan</a>.</p>` : `
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>Student</th>${classes.length > 1 ? "<th>Class</th>" : ""}${hasV ? "<th>Ver.</th>" : ""}<th class="num">Score</th><th class="num">%</th><th>Check</th><th>Scanned</th><th></th></tr></thead>
+          <thead><tr><th>Student</th>${classes.length > 1 ? "<th>Class</th>" : ""}${hasV ? "<th>Ver.</th>" : ""}<th class="num">${sortButton("student-sort", "Score", ui(t).studentSort, "Sort by score: lowest first, highest first, or by name")}</th><th class="num">%</th><th>Check</th><th>Scanned</th><th></th></tr></thead>
           <tbody>
-            ${named.map((r) => `<tr>
+            ${(() => {
+              const rowHTML = (r) => r.student ? `<tr>
               <td>${esc(St.studentName(r.student))}</td>${classes.length > 1 ? `<td>${esc(r.cls.name)}</td>` : ""}${vcol(r)}
               <td class="num">${fmtPts(r.g.score)}/${fmtPts(r.g.possible)}</td><td class="num"><strong>${pct(r.g.pct)}</strong></td>
               <td>${r.nflag ? `<span class="pill warn">${r.nflag} to check</span>` : ""}${Object.keys(r.scan.overrides || {}).length || r.scan.versionOverride ? `<span class="pill">edited</span>` : ""}</td>
               <td class="muted small">${fmtTime(r.scan.scannedAt)}</td>
-              <td><button class="btn small" data-review="${r.scan.id}">Review</button></td></tr>`).join("")}
-            ${unassigned.map((r) => `<tr class="unassigned">
+              <td><button class="btn small" data-review="${r.scan.id}">Review</button></td></tr>` : `<tr class="unassigned">
               <td><em>Blank sheet #${r.scan.sheetCode}</em> → <select data-assign="${r.scan.id}"><option value="">who is this?</option>${roster.map((x) => `<option value="${x.student.id}">${esc(St.studentName(x.student))}</option>`).join("")}</select></td>${classes.length > 1 ? "<td></td>" : ""}${vcol(r)}
               <td class="num">${fmtPts(r.g.score)}/${fmtPts(r.g.possible)}</td><td class="num"><strong>${pct(r.g.pct)}</strong></td>
               <td>${r.nflag ? `<span class="pill warn">${r.nflag} to check</span>` : ""}</td>
               <td class="muted small">${fmtTime(r.scan.scannedAt)}</td>
-              <td><button class="btn small" data-review="${r.scan.id}">Review</button></td></tr>`).join("")}
+              <td><button class="btn small" data-review="${r.scan.id}">Review</button></td></tr>`;
+              // 0 = by name (blank sheets after), 1 = lowest score first, 2 = highest first.
+              const mode = ui(t).studentSort || 0;
+              const list = named.concat(unassigned);
+              if (mode) list.sort((a, b) => (mode === 1 ? a.g.pct - b.g.pct : b.g.pct - a.g.pct) || list.indexOf(a) - list.indexOf(b));
+              return list.map(rowHTML).join("");
+            })()}
             ${missing.map((x) => `<tr class="missing"><td>${esc(St.studentName(x.student))}</td>${classes.length > 1 ? `<td>${esc(x.cls.name)}</td>` : ""}<td colspan="${ncols - 1 - (classes.length > 1 ? 1 : 0)}" class="muted">not scanned</td></tr>`).join("")}
           </tbody>
         </table></div>`}
@@ -990,7 +1004,7 @@
           ${hasV ? "Questions are numbered as on <strong>Version A</strong>; answers from every version are matched to the same question." : ""}
           For “all required” questions, each bar counts how many students bubbled that letter.</p>
         <div class="table-wrap"><table class="table items">
-          <thead><tr><th>Q</th><th>Key</th><th class="num"><button class="th-sort" id="item-sort" title="Sort by percent correct: lowest first, highest first, or question order">Correct <span class="sort-arrow">${["↕", "▲", "▼"][ui(t).itemSort || 0]}</span></button></th><th>Responses</th></tr></thead>
+          <thead><tr><th>Q</th><th>Key</th><th class="num">${sortButton("item-sort", "Correct", ui(t).itemSort, "Sort by percent correct: lowest first, highest first, or question order")}</th><th>Responses</th></tr></thead>
           <tbody>${(() => {
             const items = qc.map((ch, i) => {
               const ki = St.keyInfo(fk[i]);
@@ -1038,6 +1052,11 @@
     const is = $("#item-sort");
     if (is) is.onclick = () => {
       ui(t).itemSort = ((ui(t).itemSort || 0) + 1) % 3;
+      rerender();
+    };
+    const ss = $("#student-sort");
+    if (ss) ss.onclick = () => {
+      ui(t).studentSort = ((ui(t).studentSort || 0) + 1) % 3;
       rerender();
     };
     $$("[data-iq]").forEach((b) => (b.onclick = () => {

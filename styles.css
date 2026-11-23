@@ -333,8 +333,13 @@ details.help li { margin: 4px 0; }
 .btn.tiny { padding: 2px 8px; font-size: 0.78rem; border-radius: 6px; margin-left: 4px; }
 .check-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; background: #fff1d6; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; font-size: 0.9rem; }
 .check-bar.done { background: var(--good-bg); color: #0f5a31; }
-.th-sort { font: inherit; text-transform: inherit; letter-spacing: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; font-weight: 700; }
-.th-sort:hover { color: var(--brand); }
+/* Sortable column headers look like small buttons so it's clear they're clickable. */
+.th-sort { font: inherit; text-transform: inherit; letter-spacing: inherit; color: var(--brand); font-weight: 700;
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; margin: -3px -8px;
+  background: var(--brand-soft); border: 1px solid #c9d7f3; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+.th-sort:hover { background: #dbe6fb; border-color: var(--brand); }
+.th-sort.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+.sort-note { text-transform: none; letter-spacing: 0; font-weight: 600; font-size: 0.72rem; opacity: 0.9; }
 .sort-arrow { font-size: 0.85em; margin-left: 2px; }
 
 /* ---------- item analysis: who chose each response ---------- */
