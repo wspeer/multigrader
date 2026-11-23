@@ -1022,7 +1022,7 @@
 
       <section class="card">
         <h2>Students</h2>
-        ${graded.length === 0 && missing.length === 0 ? `<p class="muted">Nothing scanned yet. Go to <a href="#/scan">Scan</a>.</p>` : `
+        ${graded.length === 0 && missing.length === 0 ? `<p class="muted">Nothing scanned yet. Go to <a href="#/test/${t.id}/scan">3 · Scan</a>.</p>` : `
         <div class="table-wrap"><table class="table">
           <thead><tr><th>${sortButton("name-sort", "Student", ui(t).studentSort, "name", ["A–Z", "Z–A"], "Sort by last name: A–Z, Z–A, or back to the usual order")}</th>${classes.length > 1 ? "<th>Class</th>" : ""}${hasV ? "<th>Ver.</th>" : ""}<th class="num">${sortButton("student-sort", "Score", ui(t).studentSort, "score", ["lowest first", "highest first"], "Sort by score: lowest first, highest first, or back to name order")}</th><th class="num">%</th><th>Check</th><th>Scanned</th><th></th></tr></thead>
           <tbody>
@@ -1658,7 +1658,7 @@
     cam.lastSig = null;
     if (nowMs - cam.lastSeen > 1200) cam.committed = null;
     if (cam.committed) return; // keep the last result on screen until the sheet is removed
-    if (res.status === "unknown-test") setStatus(`This sheet is for a test that isn't on this device (test ${res.testCode}). Import it from <a href="#/data">Data</a>.`, "warn");
+    if (res.status === "unknown-test") setStatus(`This sheet is for a test that isn't on this device (test ${res.testCode}). Import it from <a href="#/data">Import/export</a>.`, "warn");
     else if (res.status === "no-code") setStatus("Sheet found. Hold it flat, steady and fully in view…");
     else if (res.status === "layout-error") setStatus("This test's format can't be laid out on a sheet.", "bad");
     else {
@@ -1819,7 +1819,7 @@
     const d = St.db;
     const size = new Blob([localStorage.getItem("multigrader.db.v1") || ""]).size;
     main.innerHTML = `
-      <div class="page-head"><h1>Data</h1></div>
+      <div class="page-head"><h1>Import/export</h1></div>
       <section class="card">
         <h2>Where your data lives</h2>
         <p>Everything (classes, tests, keys, and results) is stored <strong>only in this browser on this device</strong>. Nothing is uploaded anywhere.

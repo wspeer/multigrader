@@ -35,8 +35,9 @@ stored in your browser on your device.
    writes a name, and you match it after scanning) and an answer-key sheet you
    can scan to double-check the key. Print the PDF at *Actual size*, or send it
    to your copy room. The PDF is made in the browser, with no upload.
-4. **Scan.** Use *Start camera* (webcam, or a phone's back camera) and hold up
-   sheets one after another. Each sheet beeps when it's recorded. Or take photos
+4. **Scan.** In the test, open the **3 · Scan** tab. Use *Start camera* (webcam, or
+   a phone's back camera) and hold up sheets one after another. Each sheet beeps
+   when it's recorded, and a counter shows how many students are done. Or take photos
    with the phone's camera app and grade a whole stack with *Scan photos…*.
    Sheets can be scanned in any order, sideways or upside down, and mixed across
    tests: each sheet's code strip says which test and which student it is.
@@ -150,7 +151,7 @@ questions have six choices).
 Everything (rosters, tests, keys, results, and the scanned images used for review)
 stays in this browser's storage on this device. Nothing is uploaded.
 
-To scan on a phone with tests made on a laptop, use **Data → Export backup**, send
+To scan on a phone with tests made on a laptop, use **Import/export → Export backup**, send
 the file to the phone (AirDrop, email, Drive), and **Import** it there. Do the
 same in reverse to bring results back. Imports merge: newer edits win, and
 nothing is deleted. Backups contain student names and scores, so treat the file
