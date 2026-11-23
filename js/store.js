@@ -295,13 +295,17 @@
 
   /* Flag to show for a sheet position, hiding "two bubbles" when the key
    * actually requires several answers, and anything the teacher corrected or
-   * confirmed as read. */
+   * confirmed as read. A blank answer is flagged too (a skipped question, or
+   * a mark too light to read). */
   function shownFlag(scan, g, pos) {
     if (scan.overrides && scan.overrides[pos] != null) return null;
     if (scan.confirmed && scan.confirmed[pos]) return null;
     const f = scan.flags[pos];
     if (f === "multiple" && keyInfo(g.byPos[pos] && g.byPos[pos].key).all) return null;
-    return f || null;
+    if (f) return f;
+    const it = g.byPos && g.byPos[pos];
+    if (it && !it.resp && it.key) return "blank";
+    return null;
   }
   function flagCount(scan, g) {
     let n = 0;

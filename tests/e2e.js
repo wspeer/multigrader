@@ -208,6 +208,25 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   await page.waitForSelector(`[data-review='${flagged.id}']`);
   assert(+(await rowCheck()) === 0, "still checked after a reload");
 
+  // Blank answers are flagged "to check" too (Lee Jordan answered only Q1–9).
+  const lee = await page.evaluate(() => {
+    const t = MGStore.db.tests[0];
+    const s = MGStore.db.scans.find((x) => { const f = x.studentId && MGStore.findStudent(x.studentId); return f && f.student.last === "Jordan"; });
+    const g = MGStore.grade(t, s);
+    return { id: s.id, blanks: g.byPos.filter((it) => !it.resp).length, n: MGStore.flagCount(s, g) };
+  });
+  assert(lee.blanks === 16 && lee.n >= 16, `16 blank answers count as "to check" (${lee.n})`);
+  await page.click(`[data-review='${lee.id}']`);
+  await page.waitForSelector(".check-bar");
+  assert((await page.$$eval(".ov-row.flag", (rs) => rs.filter((r) => /left blank/.test(r.textContent)).length)) === 16, "Review highlights each blank as \"left blank\"");
+  const bl = await page.$eval(".ov-row.flag", (r) => r.dataset.i);
+  await page.click(`.ov-row[data-i='${bl}'] [data-ok]`);
+  assert((await page.textContent(`.ov-row[data-i='${bl}']`)).includes("checked ✓"), "a confirmed blank shows \"checked ✓\"");
+  await page.click("#ok-all");
+  await page.click("#m-done");
+  await page.waitForSelector(`[data-review='${lee.id}']`);
+  assert(+(await page.$eval(`[data-review='${lee.id}']`, (b) => (b.closest("tr").textContent.match(/(\d+) to check/) || [0, 0])[1])) === 0, "after Confirm all, no blanks left to check");
+
   // ---- item analysis: sort by % correct ----
   const order = () => page.$$eval(".items tbody tr", (trs) => trs.map((tr) => [+tr.cells[0].textContent, parseFloat(tr.cells[2].textContent)]));
   const o0 = await order();

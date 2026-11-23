@@ -1146,7 +1146,7 @@
     const vlabels = L.versionLabels(t);
     const hasV = vlabels.length > 1;
     const done = () => { closeModal(); if (onDone) onDone(); };
-    const FLAG_TEXT = { multiple: "two bubbles filled", erasure: "possible erasure", faint: "very light mark", unclear: "hard to read" };
+    const FLAG_TEXT = { multiple: "two bubbles filled", erasure: "possible erasure", faint: "very light mark", unclear: "hard to read", blank: "left blank" };
 
     const render = () => {
       const g = St.grade(t, scan);
@@ -1216,7 +1216,7 @@
                   ${ki.letters.length > 1 ? `<span class="muted small">key ${esc(St.keyText(it.key))}${ki.all ? " (all)" : ""}</span>` : ""}
                   <span class="ov-note small">${edited ? `edited (read “${esc(scan.responses[i] || "blank")}”) <a href="#" data-undo="${i}">undo</a>`
                     : flag ? `${esc(FLAG_TEXT[flag] || flag)} <button class="btn tiny" data-ok="${i}" title="The scanner read this correctly">✓ Looks right</button>`
-                    : scan.confirmed && scan.confirmed[i] && scan.flags[i] ? `<span class="good-txt">checked ✓</span> <a href="#" data-unok="${i}">undo</a>` : ""}</span>
+                    : scan.confirmed && scan.confirmed[i] ? `<span class="good-txt">checked ✓</span> <a href="#" data-unok="${i}">undo</a>` : ""}</span>
                 </div>`;
               }).join("")}
             </div>

@@ -132,7 +132,8 @@ questions have six choices).
   *Change format anyway* gives the test a new code, so old sheets are rejected
   instead of misread, and you reprint.
 - **Flags.** The scanner flags questions it isn't sure about: two bubbles filled (unless the key requires several),
-  a likely erasure, a very light mark, or a smudged area. Flagged questions are
+  a likely erasure, a very light mark, a smudged area, or a question left blank
+  (skipped, or marked too lightly to read). Flagged questions are
   highlighted in Review and counted as "to check" in Results.
 - **Camera access** needs the page to be served over `https` (GitHub Pages is fine)
   or from `localhost`. Opening `index.html` directly from disk works for
