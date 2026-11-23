@@ -94,10 +94,30 @@
   }
 
   /* PDF page content for one sheet's shape list. */
-  function pageContent(ops) {
+  /* Width, height and colour components of a JPEG, from its SOF marker. */
+  function jpegInfo(b) {
+    let i = 2;
+    while (i + 9 < b.length) {
+      if (b[i] !== 0xff) { i++; continue; }
+      const m = b[i + 1];
+      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) {
+        return { h: (b[i + 5] << 8) | b[i + 6], w: (b[i + 7] << 8) | b[i + 8], comps: b[i + 9] };
+      }
+      i += 2 + ((b[i + 2] << 8) | b[i + 3]);
+    }
+    return null;
+  }
+
+  /* PDF page content for one sheet's shape list. images: name → op, filled in
+   * for { t: "image", x, y, w, h, jpeg: Uint8Array } shapes. */
+  function pageContent(ops, images) {
     const out = ["1 J 1 j"]; // round caps/joins (check marks)
     for (const o of ops) {
-      if (o.t === "rect" || o.t === "circle") {
+      if (o.t === "image" && images) {
+        const name = "Im" + (Object.keys(images).length + 1);
+        images[name] = o;
+        out.push(`q ${f(o.w * K)} 0 0 ${f(o.h * K)} ${X(o.x)} ${Y(o.y + o.h)} cm /${name} Do Q`);
+      } else if (o.t === "rect" || o.t === "circle") {
         const path = o.t === "rect" ? roundRectPath(o.x, o.y, o.w, o.h, o.rx) : circlePath(o.cx, o.cy, o.r);
         if (o.fill && o.fill !== "none") out.push(`${rgb(o.fill)} rg ${path} f`);
         if (o.stroke) out.push(`${rgb(o.stroke)} RG ${f(o.sw * K)} w ${path} S`);
@@ -141,11 +161,22 @@
     const f2 = add([`<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>`]);
     const pageNos = [];
     for (const ops of sheets) {
-      const raw = enc.encode(pageContent(ops));
+      const images = {};
+      const raw = enc.encode(pageContent(ops, images));
       const z = await deflate(raw);
       const data = z || raw;
       const contentNo = add([`<< /Length ${data.length}${z ? " /Filter /FlateDecode" : ""} >>\nstream\n`, data, `\nendstream`]);
-      pageNos.push(add([`<< /Type /Page /Parent ${pagesNo} 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 ${f1} 0 R /F2 ${f2} 0 R >> >> /Contents ${contentNo} 0 R >>`]));
+      // Photos are embedded as-is (JPEG = DCTDecode), no re-encoding.
+      const xo = [];
+      for (const [name, im] of Object.entries(images)) {
+        const info = jpegInfo(im.jpeg);
+        if (!info) continue;
+        const cs = info.comps === 1 ? "/DeviceGray" : info.comps === 4 ? "/DeviceCMYK" : "/DeviceRGB";
+        const n = add([`<< /Type /XObject /Subtype /Image /Width ${info.w} /Height ${info.h} /ColorSpace ${cs} /BitsPerComponent 8 /Filter /DCTDecode /Length ${im.jpeg.length} >>\nstream\n`, im.jpeg, `\nendstream`]);
+        xo.push(`/${name} ${n} 0 R`);
+      }
+      const xres = xo.length ? ` /XObject << ${xo.join(" ")} >>` : "";
+      pageNos.push(add([`<< /Type /Page /Parent ${pagesNo} 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 ${f1} 0 R /F2 ${f2} 0 R >>${xres} >> /Contents ${contentNo} 0 R >>`]));
     }
     objs[pagesNo - 1] = [`<< /Type /Pages /Kids [${pageNos.map((n) => n + " 0 R").join(" ")}] /Count ${pageNos.length} >>`];
     objs[catalogNo - 1] = [`<< /Type /Catalog /Pages ${pagesNo} 0 R /ViewerPreferences << /PrintScaling /None >> >>`];
@@ -176,5 +207,5 @@
     return new Blob(chunks, { type: "application/pdf" });
   }
 
-  root.MGPdf = { sheetsToPDF, _internal: { winAnsi, widthOf, pageContent } };
+  root.MGPdf = { sheetsToPDF, jpegInfo, _internal: { winAnsi, widthOf, pageContent } };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -966,7 +966,7 @@
         ${classes.length > 1 ? `<label>Class <select id="r-filter"><option value="">All classes</option>${classes.map((c) => `<option value="${c.id}" ${filter === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>` : ""}
         ${hasV ? `<label>Version <select id="r-vfilter"><option value="">All versions</option>${vlabels.map((v) => `<option value="${v}" ${vfilter === v ? "selected" : ""}>Version ${v}</option>`).join("")}</select></label>` : ""}
         <div class="spacer"></div>
-        <button class="btn" id="r-graded" ${graded.length ? "" : "disabled"} title="One graded copy per student to hand back: their answers, the correct answers and their score">⬇ Graded copies of all bubble sheets (PDF)</button>
+        <button class="btn" id="r-graded" ${graded.length ? "" : "disabled"} title="One graded copy per student to hand back: their own scanned sheet with the correct answers circled, ✓/✗ and their score">⬇ Graded copies of all bubble sheets (PDF)</button>
         <button class="btn" id="r-csv" ${graded.length ? "" : "disabled"}>Export CSV</button>
       </div>
       ${fk.some((k) => !k) ? `<div class="notice">The answer key is incomplete (${fk.filter(Boolean).length}/${fk.length}). Unkeyed questions aren't scored. <a href="#/test/${t.id}/build">Finish the key</a></div>` : ""}
@@ -1107,14 +1107,24 @@
       btn.textContent = "Making PDF…";
       try {
         const date = fmtDate(t.date);
-        const pages = graded.map((r) => L.gradedSheetOps(t, {
-          title: t.title, date,
-          studentName: r.student ? St.studentName(r.student) : `Blank sheet #${r.scan.sheetCode}`,
-          className: r.cls ? r.cls.name : "",
-          version: hasV ? r.g.version : null,
-          items: r.g.byPos.map((it) => ({ resp: it.resp, key: it.key, correct: it.correct })),
-          score: r.g.score, possible: r.g.possible, pct: r.g.pct,
-        }));
+        // Use each student's own scanned sheet when its image is on this
+        // device; otherwise draw a clean copy.
+        const pages = [];
+        let drawn = 0;
+        for (const r of graded) {
+          const o = {
+            title: t.title, date,
+            studentName: r.student ? St.studentName(r.student) : `Blank sheet #${r.scan.sheetCode}`,
+            className: r.cls ? r.cls.name : "",
+            version: hasV ? r.g.version : null,
+            items: r.g.byPos.map((it) => ({ resp: it.resp, key: it.key, correct: it.correct, edited: !!(r.scan.overrides && r.scan.overrides[it.pos] != null) })),
+            score: r.g.score, possible: r.g.possible, pct: r.g.pct,
+          };
+          const blob = await St.getImage(r.scan.id);
+          const bytes = blob ? new Uint8Array(await blob.arrayBuffer()) : null;
+          if (bytes && MGPdf.jpegInfo(bytes)) pages.push(L.gradedScanOps(t, { ...o, image: bytes, offsets: r.scan.offsets }));
+          else { pages.push(L.gradedSheetOps(t, o)); drawn++; }
+        }
         const blob = await MGPdf.sheetsToPDF(pages, { title: `${t.title} — graded copies` });
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
@@ -1123,7 +1133,9 @@
         a.click();
         setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
         const unchecked = graded.filter((r) => r.nflag).length;
-        toast(`Downloaded ${pages.length} graded cop${pages.length === 1 ? "y" : "ies"}.` + (unchecked ? ` Note: ${unchecked} still ha${unchecked === 1 ? "s" : "ve"} answers marked “to check”.` : ""));
+        toast(`Downloaded ${pages.length} graded cop${pages.length === 1 ? "y" : "ies"}.` +
+          (drawn ? ` ${drawn} ${drawn === 1 ? "was" : "were"} drawn instead of using the scan, because ${drawn === 1 ? "its scan image isn't" : "their scan images aren't"} on this device.` : "") +
+          (unchecked ? ` Note: ${unchecked} still ha${unchecked === 1 ? "s" : "ve"} answers marked “to check”.` : ""));
       } catch (e) {
         alert("Couldn't make the PDF: " + e.message);
       } finally {

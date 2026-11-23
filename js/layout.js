@@ -401,6 +401,75 @@
     return ops;
   }
 
+  /**
+   * A graded copy made from the student's own scanned sheet: the straightened
+   * scan as the background, with a ring around each correct answer and ✓/✗
+   * drawn on top. The corner squares and code strip are covered (with the
+   * "graded copy" label and legend), and the instructions box with the score,
+   * so the copy can't be scanned again.
+   *
+   * o: as for gradedSheetOps, plus image (JPEG bytes of the straightened
+   *    scan, covering the whole page) and offsets (per question, from the scan).
+   */
+  function gradedScanOps(test, o = {}) {
+    const layout = computeLayout(test);
+    const ops = [];
+    const rect = (x, y, w, h, s) => ops.push({ t: "rect", x, y, w, h, ...s });
+    const circle = (cx, cy, r, s) => ops.push({ t: "circle", cx, cy, r, ...s });
+    const line = (pts, stroke, sw) => ops.push({ t: "line", pts, stroke, sw });
+    const text = (x, y, size, str, s) => ops.push({ t: "text", x, y, size, text: String(str), ...s });
+    const GREEN = "#1a7f45", RED = "#c62828";
+    const tick = (x, y, s) => line([[x - 0.9 * s, y], [x - 0.2 * s, y + 0.8 * s], [x + 1.1 * s, y - 0.9 * s]], GREEN, 0.6);
+    const cross = (x, y, s) => { line([[x - s, y - s], [x + s, y + s]], RED, 0.6); line([[x + s, y - s], [x - s, y + s]], RED, 0.6); };
+
+    rect(0, 0, PAGE.w, PAGE.h, { fill: "#fff" });
+    ops.push({ t: "image", x: 0, y: 0, w: PAGE.w, h: PAGE.h, jpeg: o.image });
+
+    // Cover the corner squares and code strip (top and bottom bands).
+    rect(6, 6, PAGE.w - 12, 20.5, { fill: "#fff" });
+    rect(6, PAGE.h - 26, PAGE.w - 12, 20, { fill: "#fff" });
+    text(PAGE.w / 2, 17, 3, "GRADED COPY — NOT AN ANSWER SHEET", { anchor: "middle", fill: "#666", bold: true });
+    text(AREA_LEFT, 23.5, 3.2, [o.studentName, o.date].filter(Boolean).join(" · "), { fill: "#444", bold: true });
+
+    // Score box over the instructions box.
+    const bx = 124, by = 31, bw = AREA_RIGHT + 3 - bx, bh = 22;
+    rect(bx, by, bw, bh, { rx: 2, fill: "#fff", stroke: "#333", sw: 0.4 });
+    text(bx + bw / 2, by + 5.5, 3, "SCORE", { anchor: "middle", bold: true, fill: "#555" });
+    const fmt = (x) => (Math.round(x * 100) / 100).toString();
+    text(bx + bw / 2, by + 13.5, 7, `${fmt(o.score || 0)} / ${fmt(o.possible || 0)}`, { anchor: "middle", bold: true });
+    text(bx + bw / 2, by + 19.3, 3.8, `${Math.round(o.pct || 0)}%`, { anchor: "middle", fill: "#333" });
+
+    const items = o.items || [];
+    const offsets = o.offsets || [];
+    for (const q of layout.questions) {
+      const it = items[q.index] || { resp: "", key: "", correct: null };
+      const [dx, dy] = offsets[q.index] || [0, 0];
+      const keyLetters = String(it.key || "").replace("&", "");
+      for (const b of q.bubbles) {
+        if (keyLetters.includes(b.label)) circle(b.cx + dx, b.cy + dy, BUBBLE_R + 0.9, { stroke: GREEN, sw: 0.6 });
+      }
+      const last = q.bubbles[q.bubbles.length - 1];
+      const mx = last.cx + dx + BUBBLE_R + 3.4, my = q.cy + dy;
+      if (it.correct === true) tick(mx, my, 1.25);
+      else if (it.correct === false) cross(mx, my, 1.05);
+      // Answers the teacher corrected in Review: say what was graded.
+      if (it.edited) text(mx + 2.6, my + 1, 2.5, `(graded as ${it.resp ? it.resp.split("").join("+") : "blank"})`, { fill: "#2457c5" });
+    }
+
+    // Legend in the bottom band.
+    const ly = PAGE.h - 17;
+    let lx = AREA_LEFT;
+    circle(lx + 2.4, ly, 2.2, { stroke: "#777", sw: 0.3 });
+    circle(lx + 2.4, ly, 3.1, { stroke: GREEN, sw: 0.6 });
+    text(lx + 7, ly + 1.1, 3, "ring = correct answer", { fill: "#333" }); lx += 46;
+    tick(lx + 1.5, ly, 1.25);
+    text(lx + 5, ly + 1.1, 3, "right", { fill: "#333" }); lx += 18;
+    cross(lx + 1.5, ly, 1.05);
+    text(lx + 5, ly + 1.1, 3, "wrong", { fill: "#333" });
+    text(AREA_RIGHT, ly + 1.1, 2.6, "MultiGrader · graded copy of the scanned sheet", { anchor: "end", fill: "#999" });
+    return ops;
+  }
+
   const n3 = (v) => (Math.round(v * 1000) / 1000).toString();
 
   /* Render one answer sheet as an SVG string sized to a Letter page. */
@@ -447,5 +516,6 @@
     renderSheetSVG,
     sheetOps,
     gradedSheetOps,
+    gradedScanOps,
   };
 })(typeof window !== "undefined" ? window : globalThis);

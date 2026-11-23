@@ -330,6 +330,7 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   assert(gdl.suggestedFilename() === "Unit 4 Test Quadratics - graded copies.pdf", "graded copies file: " + gdl.suggestedFilename());
   const gbytes = fs.readFileSync(gfile, "latin1");
   assert((gbytes.match(/\/Type \/Page\b(?!s)/g) || []).length === 5, "one graded copy per scanned sheet (5)");
+  assert((gbytes.match(/\/Subtype \/Image/g) || []).length === 5 && /\/DCTDecode/.test(gbytes), "each copy uses the student's own scanned image (5 JPEGs embedded)");
   let havePoppler = true;
   try { require("child_process").execFileSync("pdftotext", ["-v"], { stdio: "ignore" }); } catch (e) { havePoppler = false; }
   if (havePoppler) {
@@ -338,6 +339,7 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
     const scores = await page.evaluate(() => { const t = MGStore.db.tests[0]; return MGStore.db.scans.filter((s) => s.studentId).map((s) => { const f = MGStore.findStudent(s.studentId); return [MGStore.studentName(f.student), MGStore.grade(t, s).score]; }); });
     assert(scores.every(([name, sc]) => gtext.includes(name) && gtext.includes(`${sc} / 41`)), "each copy shows the student's name and score");
     assert((gtext.match(/GRADED COPY/g) || []).length === 5, "every page is labeled GRADED COPY");
+    assert(/\(graded as F\)/.test(gtext), "an answer corrected in Review is noted on the copy (graded as F)");
     const dir = fs.mkdtempSync(path.join(require("os").tmpdir(), "mg-g-"));
     execFileSync("pdftoppm", ["-r", "100", "-f", "1", "-l", "1", "-png", gfile, path.join(dir, "g")]);
     const g1 = fs.readdirSync(dir).find((f) => f.endsWith(".png"));
