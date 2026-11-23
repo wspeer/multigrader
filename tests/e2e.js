@@ -221,6 +221,38 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   await page.click("#item-sort");
   assert((await order()).map((r) => r[0]).join() === o0.map((r) => r[0]).join(), "3rd click: back to question order");
 
+  // ---- item analysis: who gave a particular answer ----
+  const whoExpected = (q, c) => page.evaluate(([q, c]) => {
+    const t = MGStore.db.tests[0];
+    return MGStore.db.scans.map((s) => ({ s, it: MGStore.grade(t, s).items[q] }))
+      .filter(({ it }) => (c === "blank" ? !it.resp : c === "multiple" ? it.resp.length > 1 : it.resp === c))
+      .map(({ s }) => { const f = s.studentId && MGStore.findStudent(s.studentId); return f ? MGStore.studentName(f.student) : `Blank sheet #${s.sheetCode}`; }).sort();
+  }, [q, c]);
+  const whoShown = () => page.$$eval(".who-row .who-name", (bs) => bs.map((b) => b.childNodes[0].textContent.trim()).sort());
+  const wantF = await whoExpected(0, "F");
+  await page.click(".items [data-iq='0'][data-ic='F']");
+  await page.waitForSelector(".who-row");
+  assert(JSON.stringify(await whoShown()) === JSON.stringify(wantF), `Q1 → F lists who answered F: ${wantF.join(", ")}`);
+  assert(/Q1: \d+ answered F/.test(await page.textContent(".who-row")), "the list says which question and answer");
+  const wantMulti = await whoExpected(19, "multiple");
+  await page.click(".items [data-iq='19'][data-ic='multiple']");
+  await page.waitForSelector(".who-row");
+  assert((await page.$$(".who-row")).length === 1, "only one list open at a time");
+  assert(JSON.stringify(await whoShown()) === JSON.stringify(wantMulti) && /\(A, C\)/.test(await page.textContent(".who-row")), `Q20 → multiple shows ${wantMulti.join(", ")} with the letters bubbled (A, C)`);
+  await page.click(".who-row .who-name");
+  await page.waitForSelector(".review");
+  assert((await page.textContent(".review h2")).trim() === wantMulti[0], "clicking a name opens that student's sheet");
+  await page.click("#m-done");
+  await page.waitForSelector(".who-row");
+  await page.click(".items [data-iq='19'][data-ic='multiple']");
+  assert(!(await page.$(".who-row")), "clicking the response again closes the list");
+  if (SHOTS) {
+    await page.click(".items [data-iq='0'][data-ic='F']");
+    await (await page.$(".who-row")).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(SHOTS, "who-answered.png") });
+    await page.click(".items [data-iq='0'][data-ic='F']");
+  }
+
   // ---- graded copies to hand back (PDF) ----
   const [gdl] = await Promise.all([page.waitForEvent("download"), page.click("#r-graded")]);
   const gfile = await gdl.path();

@@ -1009,22 +1009,42 @@
             // 0 = question order, 1 = lowest % first, 2 = highest % first (unkeyed last).
             const mode = ui(t).itemSort || 0;
             if (mode) items.sort((a, b) => (isNaN(a.p) - isNaN(b.p)) || (mode === 1 ? a.p - b.p : b.p - a.p) || a.i - b.i);
-            const bar = (label, n, isKey) => `<span class="resp ${isKey ? "key" : ""}" title="${n} chose ${label}"><b>${esc(label)}</b> ${n}<i style="width:${(100 * n) / graded.length}%"></i></span>`;
+            // Each response is a button; clicking it lists who gave that answer.
+            const open = ui(t).itemOpen;
+            const isOpen = (i, c) => open && open.q === i && open.c === c;
+            const bar = (i, c, n, isKey) => `<button type="button" class="resp ${isKey ? "key" : ""} ${isOpen(i, c) ? "open" : ""}" data-iq="${i}" data-ic="${esc(c)}" title="${n} chose ${esc(c)}: click to see who"><b>${esc(c)}</b> ${n}<i style="width:${(100 * n) / graded.length}%"></i></button>`;
+            const other = (i, c, label, n) => `<button type="button" class="resp other ${isOpen(i, c) ? "open" : ""}" data-iq="${i}" data-ic="${c}" title="click to see who">${label} ${n}</button>`;
+            const who = (i, c, ki) => {
+              const match = (resp) => (c === "blank" ? !resp : c === "multiple" ? resp.length > 1 && !ki.all : ki.all ? resp.includes(c) : resp === c);
+              const list = graded.filter((r) => r.g.items[i] && match(r.g.items[i].resp))
+                .map((r) => ({ r, name: r.student ? St.studentName(r.student) : `Blank sheet #${r.scan.sheetCode}`, sort: r.student ? (r.student.last + " " + r.student.first).toLowerCase() : "~" + r.scan.sheetCode }))
+                .sort((a, b) => a.sort.localeCompare(b.sort));
+              const what = c === "blank" ? "left it blank" : c === "multiple" ? "bubbled more than one answer" : ki.all ? `bubbled ${esc(c)}` : `answered ${esc(c)}`;
+              return `<tr class="who-row"><td colspan="4"><div class="who">
+                <strong>Q${i + 1}: ${list.length} ${what}</strong>
+                ${list.length ? `<div class="who-names">${list.map(({ r, name }) => `<button type="button" class="who-name" data-review="${r.scan.id}" title="Open ${esc(name)}'s sheet">${esc(name)}${(ki.all || c === "multiple") && r.g.items[i].resp.length > 1 ? ` <span class="muted">(${esc(r.g.items[i].resp.split("").join(", "))})</span>` : ""}${hasV ? ` <span class="muted">· ${r.g.version}</span>` : ""}</button>`).join("")}</div>` : ""}
+              </div></td></tr>`;
+            };
             return items.map(({ i, ch, ki, counts, blank, multi, p }) => `<tr class="${fk[i] && p < 50 ? "hard" : ""}"><td>${i + 1}</td><td>${esc(St.keyText(fk[i]) || "—")}${ki.all ? ` <span class="pill">all</span>` : ""}</td><td class="num">${pct(p)}</td>
-              <td class="resp-cell">${ch.map((c) => bar(c, counts[c] || 0, ki.letters.includes(c))).join("")}${blank ? `<span class="resp other">blank ${blank}</span>` : ""}${multi ? `<span class="resp other">multiple ${multi}</span>` : ""}</td></tr>`).join("");
+              <td class="resp-cell">${ch.map((c) => bar(i, c, counts[c] || 0, ki.letters.includes(c))).join("")}${blank ? other(i, "blank", "blank", blank) : ""}${multi ? other(i, "multiple", "multiple", multi) : ""}</td></tr>
+              ${open && open.q === i ? who(i, open.c, ki) : ""}`).join("");
           })()}</tbody>
         </table></div>
       </section>` : ""}`;
 
     const rf = $("#r-filter");
     if (rf) rf.onchange = () => { ui(t).filter = rf.value; viewResults(t); };
+    const rerender = () => { const y = window.scrollY; viewResults(t); window.scrollTo(0, y); }; // stay at the table
     const is = $("#item-sort");
     if (is) is.onclick = () => {
       ui(t).itemSort = ((ui(t).itemSort || 0) + 1) % 3;
-      const y = window.scrollY;
-      viewResults(t);
-      window.scrollTo(0, y); // stay at the table
+      rerender();
     };
+    $$("[data-iq]").forEach((b) => (b.onclick = () => {
+      const q = +b.dataset.iq, c = b.dataset.ic, o = ui(t).itemOpen;
+      ui(t).itemOpen = o && o.q === q && o.c === c ? null : { q, c };
+      rerender();
+    }));
     const vf = $("#r-vfilter");
     if (vf) vf.onchange = () => { ui(t).vfilter = vf.value; viewResults(t); };
     $$("[data-review]").forEach((b) => (b.onclick = () => openReview(b.dataset.review, () => viewResults(t))));

@@ -43,7 +43,9 @@ stored in your browser on your device.
 5. **Results.** Scores, mean/median/high/low, who hasn't been scanned, and an
    item analysis: how often each answer was chosen, with low-scoring questions
    highlighted. Click the **Correct** header to sort by percent correct:
-   lowest first, then highest first, then back to question order.
+   lowest first, then highest first, then back to question order. Click any
+   response (an answer, "blank" or "multiple") to see which students gave it;
+   click a name to open that student's sheet.
    - **Review** shows the scanned sheet with every mark outlined. Click a
      letter to fix anything misread. For a question marked "to check", click
      **✓ Looks right** if the scanner read it correctly, or **Confirm all as
