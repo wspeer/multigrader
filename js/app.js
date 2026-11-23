@@ -1308,9 +1308,9 @@
       </table></div>` : `<p class="muted">No students yet.</p>`}
       <div class="import-box" id="c-import">
         <h3>Add students</h3>
-        <p class="muted small"><strong>Paste a screenshot</strong> of your roster right here (Ctrl+V / ⌘V), drop an image file on this box, or paste text:
-          one student per line (<code>Last, First</code> or <code>First Last</code>) or rows copied from a spreadsheet or CSV export.
-          A form/grade in brackets, like <code>(IV)</code>, is kept; other tags such as “Advanced” are dropped. You'll check the names before they're added.</p>
+        <p class="muted small">Either paste a screenshot of your roster, drag and drop an image file on this box, or paste text:
+          one student per line (<code>Last, First</code> or <code>First Last</code>) or rows copied from a spreadsheet.
+          Adding a Form or grade in parentheses is optional. You can double-check the roster before the names are added.</p>
         <div class="btn-row">
           <label class="btn" for="c-img">Choose a screenshot…</label>
           <input type="file" id="c-img" accept="image/*" class="visually-hidden" />
