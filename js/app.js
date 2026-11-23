@@ -948,9 +948,13 @@
     const scannedIds = new Set(rows.filter((r) => r.student).map((r) => r.student.id));
     const missing = vfilter ? [] : roster.filter((x) => !scannedIds.has(x.student.id) && (!filter || x.cls.id === filter));
     const graded = named.concat(unassigned);
-    const pcts = graded.map((r) => r.g.pct).sort((a, b) => a - b);
-    const mean = pcts.length ? pcts.reduce((a, b) => a + b, 0) / pcts.length : NaN;
-    const median = pcts.length ? (pcts[Math.floor((pcts.length - 1) / 2)] + pcts[Math.ceil((pcts.length - 1) / 2)]) / 2 : NaN;
+    // Summary in points (e.g. 24.4/30) with the percent underneath.
+    const pts = graded.map((r) => r.g.score).sort((a, b) => a - b);
+    const possible = graded.length ? Math.max(...graded.map((r) => r.g.possible)) : 0;
+    const mean = pts.length ? pts.reduce((a, b) => a + b, 0) / pts.length : NaN;
+    const median = pts.length ? (pts[Math.floor((pts.length - 1) / 2)] + pts[Math.ceil((pts.length - 1) / 2)]) / 2 : NaN;
+    const statBox = (v, label) => `<div class="stat"><div class="stat-n">${isFinite(v) && possible ? `${fmtPts(v)}<span class="muted">/${fmtPts(possible)}</span>` : "–"}</div>` +
+      `<div class="stat-p">${isFinite(v) && possible ? pct((100 * v) / possible) : ""}</div><div class="stat-l">${label}</div></div>`;
     const fk = St.flatKey(t);
     const qc = L.questionChoices(t);
     const vcol = (r) => hasV ? `<td>${r.g.version}${r.g.versionInferred ? `<span class="warn-txt" title="Version not bubbled clearly; graded as the best-matching version">?</span>` : ""}</td>` : "";
@@ -968,10 +972,10 @@
       ${fk.some((k) => !k) ? `<div class="notice">The answer key is incomplete (${fk.filter(Boolean).length}/${fk.length}). Unkeyed questions aren't scored. <a href="#/test/${t.id}/build">Finish the key</a></div>` : ""}
       <div class="stats">
         <div class="stat"><div class="stat-n">${graded.length}${roster.length && !vfilter ? `<span class="muted">/${missing.length + named.length}</span>` : ""}</div><div class="stat-l">scanned</div></div>
-        <div class="stat"><div class="stat-n">${pct(mean)}</div><div class="stat-l">mean</div></div>
-        <div class="stat"><div class="stat-n">${pct(median)}</div><div class="stat-l">median</div></div>
-        <div class="stat"><div class="stat-n">${pcts.length ? pct(pcts[pcts.length - 1]) : "–"}</div><div class="stat-l">high</div></div>
-        <div class="stat"><div class="stat-n">${pcts.length ? pct(pcts[0]) : "–"}</div><div class="stat-l">low</div></div>
+        ${statBox(mean, "mean")}
+        ${statBox(median, "median")}
+        ${statBox(pts.length ? pts[pts.length - 1] : NaN, "high")}
+        ${statBox(pts.length ? pts[0] : NaN, "low")}
       </div>
 
       <section class="card">

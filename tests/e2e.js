@@ -244,6 +244,16 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   const sOrder = () => page.$$eval("section.card:first-of-type table tbody tr:not(.missing)", (trs) => trs.map((tr) => [tr.cells[0].textContent.trim(), parseFloat(tr.querySelector("td.num strong").textContent)]));
   const s0 = await sOrder();
   assert(s0.some((r) => r[0] === "Chen, David") && s0.some((r) => r[0] === "Garcia, Maria"), "Students table lists names as Last, First");
+  // Summary boxes: points (2 decimals max) over possible, with the percent.
+  const want = await page.evaluate(() => {
+    const t = MGStore.db.tests[0];
+    const sc = MGStore.db.scans.map((s) => MGStore.grade(t, s).score).sort((a, b) => a - b);
+    const r2 = (x) => String(Math.round(x * 100) / 100);
+    const mean = sc.reduce((a, b) => a + b, 0) / sc.length, med = (sc[Math.floor((sc.length - 1) / 2)] + sc[Math.ceil((sc.length - 1) / 2)]) / 2;
+    return [mean, med, sc[sc.length - 1], sc[0]].map((v) => `${r2(v)}/41${Math.round((100 * v) / 41)}%`);
+  });
+  const got = await page.$$eval(".stats .stat", (st) => st.slice(1).map((s) => s.querySelector(".stat-n").textContent + s.querySelector(".stat-p").textContent));
+  assert(JSON.stringify(got) === JSON.stringify(want), "mean / median / high / low shown as points and percent: " + got.join(" · "));
   assert(!(await page.$eval("#student-sort", (b) => b.classList.contains("on"))) && /⇅/.test(await page.textContent("#student-sort")), "Score header shows it's sortable (⇅) and starts unsorted");
   await page.click("#student-sort");
   const s1 = await sOrder();
