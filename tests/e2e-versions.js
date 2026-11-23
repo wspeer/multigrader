@@ -25,7 +25,7 @@ function assert(cond, msg) { if (!cond) throw new Error("ASSERT: " + msg); conso
   const srv = await serve();
   const base = `http://localhost:${srv.address().port}`;
   const browser = await chromium.launch();
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true });
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -87,20 +87,25 @@ function assert(cond, msg) { if (!cond) throw new Error("ASSERT: " + msg); conso
   // print 4 named + key sheet per version
   const testId = await page.evaluate(() => MGStore.db.tests[0].id);
   await page.goto(base + `/#/test/${testId}/print`);
-  await page.waitForSelector("#p-go");
+  await page.waitForSelector("#p-pdf");
   await page.check("#p-key");
-  assert(/Print 6 sheets/.test(await page.textContent("#p-go")), "4 students + 2 version key sheets");
-  await page.evaluate(() => { window.print = () => { window.__printed = true; }; });
-  await page.click("#p-go");
-  await page.waitForFunction(() => window.__printed);
-  const svgs = await page.$$eval("#print-root .print-page", (els) => els.map((e) => e.innerHTML));
+  assert(/6 sheets/.test(await page.textContent("#p-pdf")), "4 students + 2 version key sheets");
+  const [dl] = await Promise.all([page.waitForEvent("download"), page.click("#p-pdf")]);
+  const pdfBytes = fs.readFileSync(await dl.path(), "latin1");
+  assert((pdfBytes.match(/\/Type \/Page\b(?!s)/g) || []).length === 6, "PDF has 6 pages");
+  if (SHOTS) fs.writeFileSync(path.join(SHOTS, "v-sheets.pdf"), pdfBytes, "latin1");
+  // The same sheets as SVG (drawn from the same shapes as the PDF), to fill in and photograph.
+  const svgs = await page.evaluate(() => {
+    const t = MGStore.db.tests[0];
+    const opts = t.sheets.map((s) => {
+      const f = MGStore.findStudent(s.studentId);
+      return { testCode: t.code, sheetCode: s.code, studentName: MGStore.studentName(f.student), className: f.cls.name };
+    });
+    for (const v of ["A", "B"]) opts.push({ testCode: t.code, sheetCode: MGLayout.SHEET_KEY, key: MGStore.versionKey(t, v), version: v });
+    return opts.map((o) => MGLayout.renderSheetSVG(t, o));
+  });
   assert(svgs[0].includes(">VERSION<"), "sheets have a VERSION bubble row");
   assert(svgs[5].includes("ANSWER KEY — VERSION B"), "version B key sheet");
-  if (SHOTS) {
-    await page.emulateMedia({ media: "print" });
-    await page.pdf({ path: path.join(SHOTS, "v-sheets.pdf"), format: "Letter", printBackground: true });
-    await page.emulateMedia({ media: "screen" });
-  }
   const test = await page.evaluate(() => MGStore.db.tests[0]);
   const sheets = test.sheets; // Adams, Brown, Cruz, Diaz
 

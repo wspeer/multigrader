@@ -792,7 +792,7 @@
   }
 
   /* ================================================================
-   * PRINT
+   * ANSWER SHEETS (PDF)
    * ================================================================ */
 
   function viewPrint(t) {
@@ -804,7 +804,7 @@
       <div class="build-grid">
         <div class="build-main">
           <section class="card">
-            <h2>Print answer sheets</h2>
+            <h2>Answer sheets</h2>
             ${lay.error ? `<div class="notice bad">${esc(lay.error)} <a href="#/test/${t.id}/build">Fix the format</a></div>` : ""}
             ${classes.length ? `
               <div class="field">
@@ -817,29 +817,26 @@
                     ${classes.map((c) => `<optgroup label="${esc(c.name)}">${St.sortedStudents(c).map((s) => `<option value="${s.id}" ${sel.student === s.id ? "selected" : ""}>${esc(St.studentName(s))}</option>`).join("")}</optgroup>`).join("")}
                   </select></label>
               </div>`
-            : `<div class="notice">This test isn't assigned to a class yet. <a href="#/test/${t.id}/build">Choose classes</a> to print named sheets, or print blank sheets below.</div>`}
+            : `<div class="notice">This test isn't assigned to a class yet. <a href="#/test/${t.id}/build">Choose classes</a> to make named sheets, or make blank sheets below.</div>`}
             <div class="form-row">
               <label>Extra blank sheets <span class="muted small">(student writes their name)</span>
                 <input id="p-blanks" type="number" min="0" max="60" value="${sel.blanks}" /></label>
             </div>
-            <label class="check"><input type="checkbox" id="p-key" ${sel.key ? "checked" : ""}/> Also print ${L.versionLabels(t).length > 1 ? "an answer-key sheet for each version" : "an answer-key sheet"} <span class="muted small">(scan it to double-check your key — it's never recorded as a student)</span></label>
+            <label class="check"><input type="checkbox" id="p-key" ${sel.key ? "checked" : ""}/> Also include ${L.versionLabels(t).length > 1 ? "an answer-key sheet for each version" : "an answer-key sheet"} <span class="muted small">(scan it to double-check your key — it's never recorded as a student)</span></label>
             <div class="print-go">
-              <button class="btn primary big" id="p-go" ${lay.error ? "disabled" : ""}>Print</button>
-              <button class="btn big" id="p-pdf" ${lay.error ? "disabled" : ""} title="Download the sheets as a PDF to print from your PDF viewer">⬇ Download PDF</button>
-              <span id="p-count" class="muted"></span>
+              <button class="btn primary big" id="p-pdf" ${lay.error ? "disabled" : ""}>⬇ Download PDF</button>
             </div>
+            <p class="muted small">One PDF with every sheet, each on its own Letter-size page. Open it and print at <strong>Actual size</strong> (100%), or send it to your copy room.</p>
             <details class="help">
               <summary>Printing tips</summary>
               <ul>
-                <li><strong>Download PDF</strong> gives exact Letter-size pages; print them from your PDF viewer at <em>Actual size</em> (100%). Good for printing many copies, sending to a copy room, or keeping a file of the sheets.</li>
-                <li>Letter paper, portrait. Each sheet shrinks to fit if your browser or printer adds margins, and that scaling is fine: the scanner finds the four corner squares.</li>
-                <li>Turn off the browser's "Headers and footers" option for a cleaner page.</li>
+                <li>Letter paper, portrait, one-sided. "Fit to page" also works: the scanner finds the four corner squares, so a slightly smaller sheet scans the same.</li>
                 <li>Each sheet's code strip identifies the test <em>and</em> the student, so sheets can be scanned in any order, upside down, or mixed with other tests.</li>
-                <li>Reprinting a student's sheet gives the same code, so either copy can be scanned.</li>
+                <li>Downloading a student's sheet again gives the same code, so either copy can be scanned.</li>
               </ul>
             </details>
           </section>
-          ${St.isPrinted(t) ? `<section class="card"><h2>Printed so far</h2><p class="muted">${t.sheets.filter((s) => s.studentId).length} named sheet(s), ${t.sheets.filter((s) => !s.studentId).length} blank sheet(s).</p></section>` : ""}
+          ${St.isPrinted(t) ? `<section class="card"><h2>Sheets made so far</h2><p class="muted">${t.sheets.filter((s) => s.studentId).length} named sheet(s), ${t.sheets.filter((s) => !s.studentId).length} blank sheet(s).</p></section>` : ""}
         </div>
         <aside class="build-preview"><div class="card sticky"><h2>Preview</h2><div id="preview" class="sheet-preview"></div></div></aside>
       </div>`;
@@ -857,9 +854,7 @@
     const vlabels = L.versionLabels(t);
     const update = () => {
       const n = jobs().length + sel.blanks + (sel.key ? vlabels.length : 0);
-      $("#p-count").textContent = `${n} sheet${n === 1 ? "" : "s"}`;
-      $("#p-go").textContent = `Print ${n} sheet${n === 1 ? "" : "s"}`;
-      $("#p-go").disabled = !!lay.error || n === 0;
+      $("#p-pdf").textContent = n ? `⬇ Download PDF (${n} sheet${n === 1 ? "" : "s"})` : "⬇ Download PDF";
       $("#p-pdf").disabled = !!lay.error || n === 0;
       const first = jobs()[0];
       $("#preview").innerHTML = L.renderSheetSVG(t, {
@@ -892,7 +887,6 @@
       St.save();
       return list;
     };
-    $("#p-go").onclick = () => printPages(sheetOpts().map((o) => L.renderSheetSVG(t, o)));
     $("#p-pdf").onclick = async () => {
       const btn = $("#p-pdf");
       btn.disabled = true;
@@ -917,14 +911,6 @@
     };
     update();
   }
-
-  function printPages(svgs) {
-    const root = $("#print-root");
-    root.innerHTML = svgs.map((s) => `<div class="print-page">${s}</div>`).join("");
-    // Give the browser a moment to lay out the SVGs before opening the dialog.
-    setTimeout(() => window.print(), 150);
-  }
-  window.addEventListener("afterprint", () => { $("#print-root").innerHTML = ""; });
 
   /* ================================================================
    * RESULTS

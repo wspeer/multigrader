@@ -26,7 +26,7 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   const srv = await serve();
   const base = `http://localhost:${srv.address().port}`;
   const browser = await chromium.launch();
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 });
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1, acceptDownloads: true });
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -80,22 +80,28 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   const key = await page.evaluate(() => MGStore.flatKey(MGStore.db.tests[0]));
   assert(key.join(",") === "T,F,F,T,F,A,S,N,S,A,B,C,D,E,E,D,C,B,A,AC,B,D,E,A,E", "key stored per question: " + key.join(","));
 
-  // ---- print ----
+  // ---- answer sheets (PDF) ----
   await page.goto(base + `/#/test/${testId}/print`);
-  await page.waitForSelector("#p-go");
+  await page.waitForSelector("#p-pdf");
   await page.fill("#p-blanks", "1");
   await page.check("#p-key");
   await shot("04-print");
-  await page.evaluate(() => { window.print = () => { window.__printed = true; }; });
-  await page.click("#p-go");
-  await page.waitForFunction(() => window.__printed);
-  const svgs = await page.$$eval("#print-root .print-page", (els) => els.map((e) => e.innerHTML));
-  assert(svgs.length === 6, "printed 4 named + 1 blank + 1 key sheet = " + svgs.length);
-  if (SHOTS) {
-    await page.emulateMedia({ media: "print" });
-    await page.pdf({ path: path.join(SHOTS, "sheets.pdf"), format: "Letter", printBackground: true });
-    await page.emulateMedia({ media: "screen" });
-  }
+  assert(!(await page.$("#p-go")) && !(await page.$("#print-root")), "no browser-print path (PDF download only)");
+  const [dl] = await Promise.all([page.waitForEvent("download"), page.click("#p-pdf")]);
+  const pdfBytes = fs.readFileSync(await dl.path(), "latin1");
+  const pdfPages = (pdfBytes.match(/\/Type \/Page\b(?!s)/g) || []).length;
+  assert(pdfPages === 6, "PDF has 4 named + 1 blank + 1 key sheet = " + pdfPages);
+  if (SHOTS) fs.writeFileSync(path.join(SHOTS, "sheets.pdf"), pdfBytes, "latin1");
+  // The same sheets as SVG (drawn from the same shapes as the PDF), to fill in and photograph.
+  const svgs = await page.evaluate(() => {
+    const t = MGStore.db.tests[0];
+    const opts = t.sheets.map((s) => {
+      const f = s.studentId ? MGStore.findStudent(s.studentId) : null;
+      return { testCode: t.code, sheetCode: s.code, studentName: f ? MGStore.studentName(f.student) : "", className: f ? f.cls.name : "" };
+    });
+    opts.push({ testCode: t.code, sheetCode: MGLayout.SHEET_KEY, key: MGStore.flatKey(t) });
+    return opts.map((o) => MGLayout.renderSheetSVG(t, o));
+  });
   const test = await page.evaluate(() => MGStore.db.tests[0]);
   const sheets = test.sheets;
   assert(sheets.length === 5 && sheets.filter((s) => s.studentId).length === 4, "sheet codes assigned (4 named, 1 blank)");

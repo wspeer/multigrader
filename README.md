@@ -21,11 +21,11 @@ stored in your browser on your device.
      no partial credit.
 
    A tag on each multi-letter row switches between the two.
-3. **Print.** One sheet per student with their name printed on it, plus optional
-   blank sheets (the student writes a name, and you match it after scanning) and an
-   answer-key sheet you can scan to double-check the key. Print directly, or use
-   **⬇ Download PDF** for exact Letter-size pages; print those at *Actual size*.
-   The PDF is made in the browser, with no upload.
+3. **Print.** **⬇ Download PDF** gives one Letter-size page per sheet: one for
+   each student with their name on it, plus optional blank sheets (the student
+   writes a name, and you match it after scanning) and an answer-key sheet you
+   can scan to double-check the key. Print the PDF at *Actual size*, or send it
+   to your copy room. The PDF is made in the browser, with no upload.
 4. **Scan.** Use *Start camera* (webcam, or a phone's back camera) and hold up
    sheets one after another. Each sheet beeps when it's recorded. Or take photos
    with the phone's camera app and grade a whole stack with *Scan photos…*.
@@ -169,7 +169,6 @@ node tests/e2e.js                 # class → test → print → fill + photogra
 node tests/e2e-versions.js        # versions, either / all-required keys, missing version bubble
 node tests/latex-test.js          # finding and reordering questions in .tex files
 node tests/e2e-latex.js           # upload .tex → key from \CorrectChoice → shuffle → download
-node tests/print-test.js          # one page per sheet even when the printer forces margins
 node tests/pdf-test.js            # PDF download: page size, text, every page scans (needs poppler-utils)
 ```
 
