@@ -333,3 +333,6 @@ details.help li { margin: 4px 0; }
 .btn.tiny { padding: 2px 8px; font-size: 0.78rem; border-radius: 6px; margin-left: 4px; }
 .check-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; background: #fff1d6; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; font-size: 0.9rem; }
 .check-bar.done { background: var(--good-bg); color: #0f5a31; }
+.th-sort { font: inherit; text-transform: inherit; letter-spacing: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; font-weight: 700; }
+.th-sort:hover { color: var(--brand); }
+.sort-arrow { font-size: 0.85em; margin-left: 2px; }

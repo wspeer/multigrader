@@ -308,6 +308,99 @@
     return ops;
   }
 
+  /**
+   * A graded copy of one student's sheet, to hand back: same layout as the
+   * answer sheet, with their answers filled in, a ring around each correct
+   * answer, ✓/✗ marks and the score. No corner squares or code strip, so it
+   * can never be scanned by mistake. Works in black and white.
+   *
+   * o: { title, date, studentName, className, version,
+   *      items: per printed position { resp, key, all, correct (true/false/null) },
+   *      score, possible, pct }
+   */
+  function gradedSheetOps(test, o = {}) {
+    const layout = computeLayout(test);
+    const ops = [];
+    const rect = (x, y, w, h, s) => ops.push({ t: "rect", x, y, w, h, ...s });
+    const circle = (cx, cy, r, s) => ops.push({ t: "circle", cx, cy, r, ...s });
+    const line = (pts, stroke, sw) => ops.push({ t: "line", pts, stroke, sw });
+    const text = (x, y, size, str, s) => ops.push({ t: "text", x, y, size, text: String(str), ...s });
+    const GREEN = "#1a7f45", RED = "#c62828";
+    const tick = (x, y, s) => line([[x - 0.9 * s, y], [x - 0.2 * s, y + 0.8 * s], [x + 1.1 * s, y - 0.9 * s]], GREEN, 0.5);
+    const cross = (x, y, s) => { line([[x - s, y - s], [x + s, y + s]], RED, 0.5); line([[x + s, y - s], [x - s, y + s]], RED, 0.5); };
+
+    rect(0, 0, PAGE.w, PAGE.h, { fill: "#fff" });
+    text(PAGE.w / 2, 16, 2.8, "GRADED COPY — NOT AN ANSWER SHEET", { anchor: "middle", fill: "#888", bold: true });
+    text(AREA_LEFT, 31, 5, o.title || test.title || "Untitled test", { bold: true });
+    if (o.date) text(AREA_LEFT, 23.5, 3.4, o.date, { fill: "#555" });
+    text(AREA_LEFT, 42, 7, o.studentName || "", { bold: true });
+    const sub = [o.className, o.version ? "Version " + o.version : ""].filter(Boolean).join(" · ");
+    if (sub) text(AREA_LEFT, 48.5, 3.6, sub, { fill: "#444" });
+
+    // Score box
+    const bx = 150, by = 24, bw = AREA_RIGHT - bx, bh = 26;
+    rect(bx, by, bw, bh, { rx: 2, stroke: "#333", sw: 0.4 });
+    text(bx + bw / 2, by + 6, 3.2, "SCORE", { anchor: "middle", bold: true, fill: "#555" });
+    const fmt = (x) => (Math.round(x * 100) / 100).toString();
+    text(bx + bw / 2, by + 15.5, 8, `${fmt(o.score || 0)} / ${fmt(o.possible || 0)}`, { anchor: "middle", bold: true });
+    text(bx + bw / 2, by + 22, 4.2, `${Math.round(o.pct || 0)}%`, { anchor: "middle", fill: "#333" });
+
+    line([[AREA_LEFT, 54], [AREA_RIGHT, 54]], "#000", 0.35);
+
+    if (layout.versionRow) {
+      const v = layout.versionRow;
+      rect(v.x - 3, v.cy - 5, v.width + 5, 10, { rx: 2, stroke: "#999", sw: 0.3 });
+      text(v.x + VERSION_LABEL_W - 2, v.cy + 1.2, 3.4, "VERSION", { bold: true, anchor: "end" });
+      for (const b of v.bubbles) {
+        if (o.version === b.label) {
+          circle(b.cx, b.cy, BUBBLE_R - 0.1, { fill: "#222" });
+          text(b.cx, b.cy + 0.95, 2.6, b.label, { anchor: "middle", fill: "#fff", bold: true });
+        } else {
+          circle(b.cx, b.cy, BUBBLE_R, { stroke: "#777", sw: 0.3 });
+          text(b.cx, b.cy + 0.95, 2.6, b.label, { anchor: "middle", fill: "#999" });
+        }
+      }
+    }
+
+    const items = o.items || [];
+    for (const q of layout.questions) {
+      const it = items[q.index] || { resp: "", key: "", correct: null };
+      text(q.x + LABEL_W - 1.6, q.cy + 1.15, 3.2, q.num, { bold: true, anchor: "end" });
+      const keyLetters = String(it.key || "").replace("&", "");
+      for (const b of q.bubbles) {
+        const picked = (it.resp || "").includes(b.label);
+        if (picked) {
+          circle(b.cx, b.cy, BUBBLE_R - 0.1, { fill: "#222" });
+          text(b.cx, b.cy + 0.95, 2.6, b.label, { anchor: "middle", fill: "#fff", bold: true });
+        } else {
+          circle(b.cx, b.cy, BUBBLE_R, { stroke: "#777", sw: 0.3 });
+          text(b.cx, b.cy + 0.95, 2.6, b.label, { anchor: "middle", fill: "#999" });
+        }
+        // Ring around each correct answer (whether or not it was chosen).
+        if (keyLetters.includes(b.label)) circle(b.cx, b.cy, BUBBLE_R + 0.85, { stroke: GREEN, sw: 0.55 });
+      }
+      const last = q.bubbles[q.bubbles.length - 1];
+      const mx = last.cx + BUBBLE_R + 3.2;
+      if (it.correct === true) tick(mx, q.cy, 1.2);
+      else if (it.correct === false) cross(mx, q.cy, 1.0);
+    }
+
+    // Legend
+    const ly = PAGE.h - 22;
+    let lx = AREA_LEFT;
+    circle(lx + 2.4, ly, 2.2, { fill: "#222" });
+    text(lx + 6, ly + 1.1, 3, "your answer", { fill: "#333" }); lx += 30;
+    circle(lx + 2.4, ly, 2.2, { stroke: "#777", sw: 0.3 });
+    circle(lx + 2.4, ly, 3.05, { stroke: GREEN, sw: 0.55 });
+    text(lx + 7, ly + 1.1, 3, "ring = correct answer", { fill: "#333" }); lx += 46;
+    tick(lx + 1.5, ly, 1.2);
+    text(lx + 5, ly + 1.1, 3, "right", { fill: "#333" }); lx += 18;
+    cross(lx + 1.5, ly, 1.0);
+    text(lx + 5, ly + 1.1, 3, "wrong", { fill: "#333" });
+    text(PAGE.w / 2, PAGE.h - 12, 2.6, "MultiGrader · graded copy", { anchor: "middle", fill: "#999" });
+    return ops;
+  }
+
   const n3 = (v) => (Math.round(v * 1000) / 1000).toString();
 
   /* Render one answer sheet as an SVG string sized to a Letter page. */
@@ -353,5 +446,6 @@
     codeCellCenters,
     renderSheetSVG,
     sheetOps,
+    gradedSheetOps,
   };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -949,6 +949,7 @@
         ${classes.length > 1 ? `<label>Class <select id="r-filter"><option value="">All classes</option>${classes.map((c) => `<option value="${c.id}" ${filter === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>` : ""}
         ${hasV ? `<label>Version <select id="r-vfilter"><option value="">All versions</option>${vlabels.map((v) => `<option value="${v}" ${vfilter === v ? "selected" : ""}>Version ${v}</option>`).join("")}</select></label>` : ""}
         <div class="spacer"></div>
+        <button class="btn" id="r-graded" ${graded.length ? "" : "disabled"} title="One graded copy per student to hand back: their answers, the correct answers and their score">⬇ Graded copies (PDF)</button>
         <button class="btn" id="r-csv" ${graded.length ? "" : "disabled"}>Export CSV</button>
       </div>
       ${fk.some((k) => !k) ? `<div class="notice">The answer key is incomplete (${fk.filter(Boolean).length}/${fk.length}). Unkeyed questions aren't scored. <a href="#/test/${t.id}/build">Finish the key</a></div>` : ""}
@@ -989,29 +990,41 @@
           ${hasV ? "Questions are numbered as on <strong>Version A</strong>; answers from every version are matched to the same question." : ""}
           For “all required” questions, each bar counts how many students bubbled that letter.</p>
         <div class="table-wrap"><table class="table items">
-          <thead><tr><th>Q</th><th>Key</th><th class="num">Correct</th><th>Responses</th></tr></thead>
-          <tbody>${qc.map((ch, i) => {
-            const ki = St.keyInfo(fk[i]);
-            const counts = {};
-            let blank = 0, multi = 0, correct = 0;
-            for (const r of graded) {
-              const it = r.g.items[i];
-              if (!it) continue;
-              if (!it.resp) blank++;
-              else if (it.resp.length > 1 && !ki.all) multi++;
-              else for (const c of it.resp) counts[c] = (counts[c] || 0) + 1;
-              if (it.correct) correct++;
-            }
-            const p = fk[i] ? (100 * correct) / graded.length : NaN;
+          <thead><tr><th>Q</th><th>Key</th><th class="num"><button class="th-sort" id="item-sort" title="Sort by percent correct: lowest first, highest first, or question order">Correct <span class="sort-arrow">${["↕", "▲", "▼"][ui(t).itemSort || 0]}</span></button></th><th>Responses</th></tr></thead>
+          <tbody>${(() => {
+            const items = qc.map((ch, i) => {
+              const ki = St.keyInfo(fk[i]);
+              const counts = {};
+              let blank = 0, multi = 0, correct = 0;
+              for (const r of graded) {
+                const it = r.g.items[i];
+                if (!it) continue;
+                if (!it.resp) blank++;
+                else if (it.resp.length > 1 && !ki.all) multi++;
+                else for (const c of it.resp) counts[c] = (counts[c] || 0) + 1;
+                if (it.correct) correct++;
+              }
+              return { i, ch, ki, counts, blank, multi, p: fk[i] ? (100 * correct) / graded.length : NaN };
+            });
+            // 0 = question order, 1 = lowest % first, 2 = highest % first (unkeyed last).
+            const mode = ui(t).itemSort || 0;
+            if (mode) items.sort((a, b) => (isNaN(a.p) - isNaN(b.p)) || (mode === 1 ? a.p - b.p : b.p - a.p) || a.i - b.i);
             const bar = (label, n, isKey) => `<span class="resp ${isKey ? "key" : ""}" title="${n} chose ${label}"><b>${esc(label)}</b> ${n}<i style="width:${(100 * n) / graded.length}%"></i></span>`;
-            return `<tr class="${fk[i] && p < 50 ? "hard" : ""}"><td>${i + 1}</td><td>${esc(St.keyText(fk[i]) || "—")}${ki.all ? ` <span class="pill">all</span>` : ""}</td><td class="num">${pct(p)}</td>
-              <td class="resp-cell">${ch.map((c) => bar(c, counts[c] || 0, ki.letters.includes(c))).join("")}${blank ? `<span class="resp other">blank ${blank}</span>` : ""}${multi ? `<span class="resp other">multiple ${multi}</span>` : ""}</td></tr>`;
-          }).join("")}</tbody>
+            return items.map(({ i, ch, ki, counts, blank, multi, p }) => `<tr class="${fk[i] && p < 50 ? "hard" : ""}"><td>${i + 1}</td><td>${esc(St.keyText(fk[i]) || "—")}${ki.all ? ` <span class="pill">all</span>` : ""}</td><td class="num">${pct(p)}</td>
+              <td class="resp-cell">${ch.map((c) => bar(c, counts[c] || 0, ki.letters.includes(c))).join("")}${blank ? `<span class="resp other">blank ${blank}</span>` : ""}${multi ? `<span class="resp other">multiple ${multi}</span>` : ""}</td></tr>`).join("");
+          })()}</tbody>
         </table></div>
       </section>` : ""}`;
 
     const rf = $("#r-filter");
     if (rf) rf.onchange = () => { ui(t).filter = rf.value; viewResults(t); };
+    const is = $("#item-sort");
+    if (is) is.onclick = () => {
+      ui(t).itemSort = ((ui(t).itemSort || 0) + 1) % 3;
+      const y = window.scrollY;
+      viewResults(t);
+      window.scrollTo(0, y); // stay at the table
+    };
     const vf = $("#r-vfilter");
     if (vf) vf.onchange = () => { ui(t).vfilter = vf.value; viewResults(t); };
     $$("[data-review]").forEach((b) => (b.onclick = () => openReview(b.dataset.review, () => viewResults(t))));
@@ -1023,6 +1036,37 @@
       scan.studentId = s.value; scan.updatedAt = St.now();
       St.save(); viewResults(t);
     }));
+    $("#r-graded").onclick = async () => {
+      const btn = $("#r-graded");
+      const label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Making PDF…";
+      try {
+        const date = fmtDate(t.date);
+        const pages = graded.map((r) => L.gradedSheetOps(t, {
+          title: t.title, date,
+          studentName: r.student ? St.studentName(r.student) : `Blank sheet #${r.scan.sheetCode}`,
+          className: r.cls ? r.cls.name : "",
+          version: hasV ? r.g.version : null,
+          items: r.g.byPos.map((it) => ({ resp: it.resp, key: it.key, correct: it.correct })),
+          score: r.g.score, possible: r.g.possible, pct: r.g.pct,
+        }));
+        const blob = await MGPdf.sheetsToPDF(pages, { title: `${t.title} — graded copies` });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = `${safeFileName(t.title)} - graded copies.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        const unchecked = graded.filter((r) => r.nflag).length;
+        toast(`Downloaded ${pages.length} graded cop${pages.length === 1 ? "y" : "ies"}.` + (unchecked ? ` Note: ${unchecked} still ha${unchecked === 1 ? "s" : "ve"} answers marked “to check”.` : ""));
+      } catch (e) {
+        alert("Couldn't make the PDF: " + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = label;
+      }
+    };
     $("#r-csv").onclick = () => {
       const quick = (k) => { const { letters, all } = St.keyInfo(k); return letters.length > 1 ? (all ? `[${letters}]` : `(${letters})`) : letters; };
       const hasForm = graded.some((r) => r.student && r.student.form);

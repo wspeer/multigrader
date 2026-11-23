@@ -208,6 +208,46 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   await page.waitForSelector(`[data-review='${flagged.id}']`);
   assert(+(await rowCheck()) === 0, "still checked after a reload");
 
+  // ---- item analysis: sort by % correct ----
+  const order = () => page.$$eval(".items tbody tr", (trs) => trs.map((tr) => [+tr.cells[0].textContent, parseFloat(tr.cells[2].textContent)]));
+  const o0 = await order();
+  assert(o0.map((r) => r[0]).join() === o0.map((_, i) => i + 1).join(), "item analysis starts in question order");
+  await page.click("#item-sort");
+  const o1 = await order();
+  assert(o1.every((r, k) => k === 0 || r[1] >= o1[k - 1][1]), "1st click: lowest % first (" + o1.slice(0, 4).map((r) => `Q${r[0]} ${r[1]}%`).join(", ") + ", …)");
+  await page.click("#item-sort");
+  const o2 = await order();
+  assert(o2.every((r, k) => k === 0 || r[1] <= o2[k - 1][1]), "2nd click: highest % first");
+  await page.click("#item-sort");
+  assert((await order()).map((r) => r[0]).join() === o0.map((r) => r[0]).join(), "3rd click: back to question order");
+
+  // ---- graded copies to hand back (PDF) ----
+  const [gdl] = await Promise.all([page.waitForEvent("download"), page.click("#r-graded")]);
+  const gfile = await gdl.path();
+  assert(gdl.suggestedFilename() === "Unit 4 Test Quadratics - graded copies.pdf", "graded copies file: " + gdl.suggestedFilename());
+  const gbytes = fs.readFileSync(gfile, "latin1");
+  assert((gbytes.match(/\/Type \/Page\b(?!s)/g) || []).length === 5, "one graded copy per scanned sheet (5)");
+  let havePoppler = true;
+  try { require("child_process").execFileSync("pdftotext", ["-v"], { stdio: "ignore" }); } catch (e) { havePoppler = false; }
+  if (havePoppler) {
+    const { execFileSync } = require("child_process");
+    const gtext = execFileSync("pdftotext", ["-layout", gfile, "-"]).toString();
+    const scores = await page.evaluate(() => { const t = MGStore.db.tests[0]; return MGStore.db.scans.filter((s) => s.studentId).map((s) => { const f = MGStore.findStudent(s.studentId); return [MGStore.studentName(f.student), MGStore.grade(t, s).score]; }); });
+    assert(scores.every(([name, sc]) => gtext.includes(name) && gtext.includes(`${sc} / 41`)), "each copy shows the student's name and score");
+    assert((gtext.match(/GRADED COPY/g) || []).length === 5, "every page is labeled GRADED COPY");
+    const dir = fs.mkdtempSync(path.join(require("os").tmpdir(), "mg-g-"));
+    execFileSync("pdftoppm", ["-r", "100", "-f", "1", "-l", "1", "-png", gfile, path.join(dir, "g")]);
+    const g1 = fs.readdirSync(dir).find((f) => f.endsWith(".png"));
+    if (SHOTS) fs.copyFileSync(path.join(dir, g1), path.join(SHOTS, "graded-copy.png"));
+    const st = await page.evaluate(async (u) => {
+      const img = new Image(); img.src = u; await img.decode();
+      const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
+      c.getContext("2d").drawImage(img, 0, 0);
+      return MGScanner.scan(c.getContext("2d").getImageData(0, 0, c.width, c.height), { getTest: MGStore.testByCode }).status;
+    }, "data:image/png;base64," + fs.readFileSync(path.join(dir, g1)).toString("base64"));
+    assert(st !== "ok", "a graded copy can't be scanned as an answer sheet (" + st + ")");
+  }
+
   // ---- export / import round trip ----
   const json = await page.evaluate(() => MGStore.exportJSON());
   const page2 = await (await browser.newContext()).newPage();

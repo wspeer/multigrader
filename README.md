@@ -41,10 +41,20 @@ stored in your browser on your device.
    Sheets can be scanned in any order, sideways or upside down, and mixed across
    tests: each sheet's code strip says which test and which student it is.
 5. **Results.** Scores, mean/median/high/low, who hasn't been scanned, and an
-   item analysis (how often each answer was chosen, with low-scoring questions
-   highlighted). Click **Review** to see the scanned sheet with every mark
-   outlined, and click a letter to fix anything misread. Changing the key
-   regrades everything. Export results as CSV.
+   item analysis: how often each answer was chosen, with low-scoring questions
+   highlighted. Click the **Correct** header to sort by percent correct:
+   lowest first, then highest first, then back to question order.
+   - **Review** shows the scanned sheet with every mark outlined. Click a
+     letter to fix anything misread. For a question marked "to check", click
+     **✓ Looks right** if the scanner read it correctly, or **Confirm all as
+     read**. The "to check" count then goes away.
+   - Changing the key regrades everything.
+   - **⬇ Graded copies (PDF)** makes one page per student to hand back
+     instead of their marked-up sheet: their answers filled in, a ring
+     around each correct answer, ✓/✗, and their score. Graded copies have no
+     corner squares or code strip, so they can't be scanned as answer sheets
+     (or altered and resubmitted).
+   - Export results as CSV.
 
 ### Versions
 
