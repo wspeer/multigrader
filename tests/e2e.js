@@ -345,7 +345,7 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "results-hidden.png"), fullPage: true });
   await page.click("#r-hide");
   await page.waitForSelector("#r-graded");
-  assert((await statLabels()).includes("high") && (await page.$("[data-review]")) && (await page.$("[data-iq]")) && (await page.$eval("#r-hide", (b) => b.getAttribute("aria-pressed"))) === "false", "Show student scores brings everything back");
+  assert((await statLabels()).includes("high") && (await page.$("[data-review]")) && (await page.$("[data-iq]")) && (await page.$eval("#r-hide", (b) => b.getAttribute("aria-pressed"))) === "false", "Show individual scores brings everything back");
 
   // ---- graded copies to hand back (PDF) ----
   const [gdl] = await Promise.all([page.waitForEvent("download"), page.click("#r-graded")]);

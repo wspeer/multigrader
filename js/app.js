@@ -8,7 +8,7 @@
   const main = $("#main");
   const uiState = {}; // per-test view state that shouldn't be saved
   const ui = (t) => uiState[t.id] || (uiState[t.id] = {});
-  // "Hide student scores" on Results, for showing the page to a class. Kept on
+  // "Hide individual scores" on Results, for showing the page to a class. Kept on
   // this device (until switched off) so a reload doesn't reveal the scores.
   const HIDE_KEY = "multigrader.hideScores";
   const scoresHidden = () => { try { return localStorage.getItem(HIDE_KEY) === "1"; } catch { return false; } };
@@ -1001,7 +1001,7 @@
         ${classes.length > 1 ? `<label>Class <select id="r-filter"><option value="">All classes</option>${classes.map((c) => `<option value="${c.id}" ${filter === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>` : ""}
         ${hasV ? `<label>Version <select id="r-vfilter"><option value="">All versions</option>${vlabels.map((v) => `<option value="${v}" ${vfilter === v ? "selected" : ""}>Version ${v}</option>`).join("")}</select></label>` : ""}
         <div class="spacer"></div>
-        <button class="btn ${hide ? "primary" : ""}" id="r-hide" aria-pressed="${hide}" title="${hide ? "Show the student list, individual scores, high and low again" : "Hide the student list, individual scores, high and low, so you can show this page to the class"}">${hide ? "Show student scores" : "Hide student scores"}</button>
+        <button class="btn primary" id="r-hide" aria-pressed="${hide}" title="${hide ? "Show the student list, individual scores, high and low again" : "Hide the student list, individual scores, high and low, so you can show this page to the class"}">${hide ? "Show individual scores" : "Hide individual scores"}</button>
         ${hide ? "" : `<button class="btn" id="r-graded" ${graded.length ? "" : "disabled"} title="One graded copy per student to hand back: their own scanned sheet with the correct answers circled, ✓/✗ and their score">⬇ Graded copies of all bubble sheets (PDF)</button>
         <button class="btn" id="r-csv" ${graded.length ? "" : "disabled"}>Export CSV</button>`}
       </div>
