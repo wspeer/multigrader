@@ -1844,7 +1844,7 @@
       </section>
       <section class="card">
         <h2>Back up or move to another device or browser</h2>
-        <p class="muted">Export here, then import in new device or browser. Multiple imports will merge.</p>
+        <p class="muted">Export here, then import to new device or browser. Multiple imports will merge.</p>
         <label class="check"><input type="checkbox" id="d-images" checked /> Include scanned sheet images <span class="muted small" id="d-images-size"></span></label>
         <p class="muted small">With images, Review and graded copies on the other device show the real scanned sheets. Without them the file is much smaller, and copies are drawn instead.</p>
         <div class="btn-row">
