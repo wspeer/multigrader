@@ -327,7 +327,7 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   // ---- hide student scores (for showing the page to the class) ----
   const nItems = (await page.$$(".items tbody tr")).length;
   await page.click("#r-hide");
-  await page.waitForSelector(".notice.class-view");
+  await page.waitForSelector("#r-hide[aria-pressed=\"true\"]");
   const statLabels = () => page.$$eval(".stat-l", (els) => els.map((e) => e.textContent.trim()));
   const allNames = await page.evaluate(() => MGStore.db.classes.flatMap((c) => c.students.flatMap((s) => [s.first, s.last])));
   const classView = async () => {
@@ -340,12 +340,12 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   };
   await classView();
   await page.reload();
-  await page.waitForSelector(".notice.class-view");
+  await page.waitForSelector("#r-hide[aria-pressed=\"true\"]");
   await classView();
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "results-hidden.png"), fullPage: true });
   await page.click("#r-hide");
   await page.waitForSelector("#r-graded");
-  assert((await statLabels()).includes("high") && (await page.$("[data-review]")) && (await page.$("[data-iq]")) && !(await page.$(".notice.class-view")), "Show student scores brings everything back");
+  assert((await statLabels()).includes("high") && (await page.$("[data-review]")) && (await page.$("[data-iq]")) && (await page.$eval("#r-hide", (b) => b.getAttribute("aria-pressed"))) === "false", "Show student scores brings everything back");
 
   // ---- graded copies to hand back (PDF) ----
   const [gdl] = await Promise.all([page.waitForEvent("download"), page.click("#r-graded")]);

@@ -1001,11 +1001,10 @@
         ${classes.length > 1 ? `<label>Class <select id="r-filter"><option value="">All classes</option>${classes.map((c) => `<option value="${c.id}" ${filter === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>` : ""}
         ${hasV ? `<label>Version <select id="r-vfilter"><option value="">All versions</option>${vlabels.map((v) => `<option value="${v}" ${vfilter === v ? "selected" : ""}>Version ${v}</option>`).join("")}</select></label>` : ""}
         <div class="spacer"></div>
-        <button class="btn ${hide ? "primary" : ""}" id="r-hide" aria-pressed="${hide}" title="${hide ? "Show the student list, individual scores, high and low again" : "Hide the student list, individual scores, high and low, so you can show this page to the class"}">${hide ? "👁 Show student scores" : "🙈 Hide student scores"}</button>
+        <button class="btn ${hide ? "primary" : ""}" id="r-hide" aria-pressed="${hide}" title="${hide ? "Show the student list, individual scores, high and low again" : "Hide the student list, individual scores, high and low, so you can show this page to the class"}">${hide ? "Show student scores" : "Hide student scores"}</button>
         ${hide ? "" : `<button class="btn" id="r-graded" ${graded.length ? "" : "disabled"} title="One graded copy per student to hand back: their own scanned sheet with the correct answers circled, ✓/✗ and their score">⬇ Graded copies of all bubble sheets (PDF)</button>
         <button class="btn" id="r-csv" ${graded.length ? "" : "disabled"}>Export CSV</button>`}
       </div>
-      ${hide ? `<div class="notice class-view">Student scores are hidden: only the class mean, median and item analysis are shown. Click <strong>👁 Show student scores</strong> to see them again.</div>` : ""}
       ${fk.some((k) => !k) ? `<div class="notice">The answer key is incomplete (${fk.filter(Boolean).length}/${fk.length}). Unkeyed questions aren't scored. <a href="#/test/${t.id}/build">Finish the key</a></div>` : ""}
       <div class="stats ${hide ? "class-view" : ""}">
         ${roster.length && !vfilter

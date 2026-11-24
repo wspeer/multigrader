@@ -117,7 +117,6 @@ label.check input { width: 17px; height: 17px; }
 
 .notice { background: var(--warn-bg); border: 1px solid #f3dcae; color: #6b4a07; border-radius: 10px; padding: 10px 14px; margin: 0 0 14px; }
 .notice.bad { background: var(--bad-bg); border-color: #f5c6c2; color: #8a1d16; }
-.notice.class-view { background: #eef3fb; border-color: #cfdcf0; color: #23406b; }
 .notice .btn { margin-left: 8px; }
 details.help { margin-top: 14px; color: #3a4658; }
 details.help summary { cursor: pointer; font-weight: 600; font-size: 0.9rem; color: var(--muted); }
