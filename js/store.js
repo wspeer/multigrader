@@ -388,6 +388,33 @@
     return JSON.stringify({ app: "multigrader", exportedAt: now(), ...db }, null, 1);
   }
 
+  const blobToDataURL = (b) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(b); });
+  const dataURLToBlob = async (u) => (await fetch(u)).blob();
+
+  /* Saved scan images for the scans on this device: { count, bytes }. */
+  async function imageStats() {
+    let count = 0, bytes = 0;
+    for (const sc of db.scans) {
+      const b = await getImage(sc.id);
+      if (b) { count++; bytes += b.size; }
+    }
+    return { count, bytes };
+  }
+
+  /* Backup file contents. With images, the scanned sheets are included as
+   * data URLs under "images" (scan id → image). */
+  async function exportBackup({ images = true } = {}) {
+    const out = { app: "multigrader", exportedAt: now(), ...db };
+    if (images) {
+      out.images = {};
+      for (const sc of db.scans) {
+        const b = await getImage(sc.id);
+        if (b) out.images[sc.id] = await blobToDataURL(b);
+      }
+    }
+    return JSON.stringify(out, null, 1);
+  }
+
   const newer = (a, b) => (a.updatedAt || "") >= (b.updatedAt || "");
 
   /* Merge a backup into this device. Newer edits win; scans of the same sheet keep the latest. */
@@ -395,6 +422,9 @@
     const inc = JSON.parse(text);
     if (!inc || !Array.isArray(inc.tests) || !Array.isArray(inc.classes)) throw new Error("This doesn't look like a MultiGrader backup.");
     const counts = { classes: 0, tests: 0, scans: 0 };
+    const imageIds = []; // imported scans: their image comes from the backup
+    const fillIds = []; // scans kept from this device: use the backup's image only if missing
+    const dropImages = []; // local images of scans replaced by a different one
     for (const c of inc.classes) {
       const i = db.classes.findIndex((x) => x.id === c.id);
       if (i < 0) { db.classes.push(c); counts.classes++; } else if (newer(c, db.classes[i])) { db.classes[i] = c; counts.classes++; }
@@ -414,9 +444,38 @@
     }
     for (const s of inc.scans || []) {
       const i = db.scans.findIndex((x) => x.id === s.id || (x.testId === s.testId && x.sheetCode === s.sheetCode));
-      if (i < 0) { db.scans.push(s); counts.scans++; } else if (newer(s, db.scans[i])) { db.scans[i] = s; counts.scans++; }
+      if (i < 0) { db.scans.push(s); counts.scans++; imageIds.push(s.id); }
+      else if (newer(s, db.scans[i])) {
+        if (db.scans[i].id !== s.id) dropImages.push(db.scans[i].id);
+        db.scans[i] = s; counts.scans++; imageIds.push(s.id);
+      } else if (db.scans[i].id === s.id) fillIds.push(s.id);
     }
     save();
+    counts.imageIds = imageIds;
+    counts.fillIds = fillIds;
+    counts.dropImages = dropImages;
+    return counts;
+  }
+
+  /* Import a backup, including any scanned images it contains. */
+  async function importBackup(text) {
+    const inc = JSON.parse(text);
+    const counts = importJSON(text);
+    counts.images = 0;
+    for (const id of counts.dropImages) await deleteImage(id);
+    if (inc && inc.images) {
+      const ok = (u) => typeof u === "string" && /^data:image\/(jpeg|png);base64,/.test(u);
+      for (const id of counts.imageIds) {
+        if (!ok(inc.images[id])) continue;
+        await putImage(id, await dataURLToBlob(inc.images[id]));
+        counts.images++;
+      }
+      for (const id of counts.fillIds) {
+        if (!ok(inc.images[id]) || (await getImage(id))) continue;
+        await putImage(id, await dataURLToBlob(inc.images[id]));
+        counts.images++;
+      }
+    }
     return counts;
   }
 
@@ -435,6 +494,6 @@
     gradeAs, scanVersion, shownFlag, flagCount,
     isPrinted, resetFormat, sheetFor, newBlankSheet, sheetInfo,
     scansFor, effectiveResponse, grade, saveScan, deleteScan,
-    putImage, getImage, exportJSON, importJSON, eraseAll,
+    putImage, getImage, exportJSON, importJSON, exportBackup, importBackup, imageStats, eraseAll,
   };
 })(window);

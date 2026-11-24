@@ -1828,24 +1828,37 @@
       <section class="card">
         <h2>Back up or move to another device</h2>
         <p class="muted">Use this to scan on your phone with tests made on your laptop: export here, send the file to your phone (AirDrop, email, Drive), and import it there. After scanning, export from the phone and import back on the laptop. Imports <strong>merge</strong>: newer edits win, and nothing on this device is deleted.</p>
+        <label class="check"><input type="checkbox" id="d-images" checked /> Include scanned sheet images <span class="muted small" id="d-images-size"></span></label>
+        <p class="muted small">With images, Review and graded copies on the other device show the real scanned sheets. Without them the file is much smaller, and copies are drawn instead.</p>
         <div class="btn-row">
           <button class="btn primary" id="d-export">Export backup</button>
           <label class="btn" for="d-import">Import / merge…</label>
           <input type="file" id="d-import" accept=".json,application/json" class="visually-hidden"/>
         </div>
-        <p class="muted small">Backups contain student names and scores; treat the file like a gradebook. Scanned-sheet images aren't included.</p>
+        <p class="muted small">Backups contain student names and scores (and, with images, their answer sheets); treat the file like a gradebook.</p>
       </section>
       <section class="card">
         <h2>Start over</h2>
         <button class="btn danger ghost" id="d-erase">Erase everything on this device…</button>
       </section>`;
-    $("#d-export").onclick = () => download(`multigrader-backup-${St.today()}.json`, St.exportJSON(), "application/json");
+    St.imageStats().then(({ count, bytes }) => {
+      const el = $("#d-images-size");
+      if (el) el.textContent = count ? `(${count} image${count === 1 ? "" : "s"}, about ${Math.max(0.1, Math.round((bytes * 1.37) / 1e5) / 10)} MB)` : "(none on this device)";
+    });
+    $("#d-export").onclick = async () => {
+      const btn = $("#d-export");
+      btn.disabled = true;
+      try {
+        const text = await St.exportBackup({ images: $("#d-images").checked });
+        download(`multigrader-backup-${St.today()}.json`, text, "application/json");
+      } finally { btn.disabled = false; }
+    };
     $("#d-import").onchange = async (e) => {
       const f = e.target.files[0];
       if (!f) return;
       try {
-        const c = St.importJSON(await f.text());
-        toast(`Imported: ${c.classes} class(es), ${c.tests} test(s), ${c.scans} scan(s) added or updated.`, "good");
+        const c = await St.importBackup(await f.text());
+        toast(`Imported: ${c.classes} class(es), ${c.tests} test(s), ${c.scans} scan(s)${c.images ? ` and ${c.images} scanned image${c.images === 1 ? "" : "s"}` : ""} added or updated.`, "good");
         viewData();
       } catch (err) { alert("Import failed: " + err.message); }
       e.target.value = "";

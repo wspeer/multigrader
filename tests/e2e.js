@@ -374,13 +374,30 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
   }
 
   // ---- export / import round trip ----
-  const json = await page.evaluate(() => MGStore.exportJSON());
+  await page.goto(base + "/#/data");
+  await page.waitForFunction(() => /5 images/.test(document.querySelector("#d-images-size").textContent));
+  assert(/5 images, about [\d.]+ MB/.test(await page.textContent("#d-images-size")), "Import/export shows the images and their size: " + (await page.textContent("#d-images-size")));
+  const [bdl] = await Promise.all([page.waitForEvent("download"), page.click("#d-export")]);
+  const json = fs.readFileSync(await bdl.path(), "utf8");
+  await page.uncheck("#d-images");
+  const [bdl2] = await Promise.all([page.waitForEvent("download"), page.click("#d-export")]);
+  const jsonNoImg = fs.readFileSync(await bdl2.path(), "utf8");
+  assert(Object.keys(JSON.parse(json).images || {}).length === 5 && !JSON.parse(jsonNoImg).images && jsonNoImg.length < json.length / 5,
+    `backup includes the 5 scan images (${(json.length / 1e6).toFixed(2)} MB; without images ${(jsonNoImg.length / 1e3).toFixed(0)} KB)`);
   const page2 = await (await browser.newContext()).newPage();
   await page2.goto(base + "/#/data");
   await page2.setInputFiles("#d-import", { name: "backup.json", mimeType: "application/json", buffer: Buffer.from(json) });
-  await page2.waitForTimeout(300);
+  await page2.waitForFunction(() => /Imported/.test(document.querySelector("#toast").textContent));
+  assert(/and 5 scanned images/.test(await page2.textContent("#toast")), "import reports the images: " + (await page2.textContent("#toast")));
   const n2 = await page2.evaluate(() => [MGStore.db.classes.length, MGStore.db.tests.length, MGStore.db.scans.length]);
   assert(n2.join() === "1,1,5", "backup imports on a fresh device: " + n2);
+  const imgs2 = await page2.evaluate(async () => { let n = 0; for (const s of MGStore.db.scans) if (await MGStore.getImage(s.id)) n++; return n; });
+  assert(imgs2 === 5, "all 5 scan images restored on the new device");
+  await page2.goto(base + `/#/test/${testId}/results`);
+  await page2.click("[data-review]");
+  await page2.waitForSelector(".review .img-wrap img");
+  assert(await page2.$eval(".review .img-wrap img", (i) => i.complete && i.naturalWidth > 500), "Review on the new device shows the scanned sheet");
+  await page2.click("#m-done");
 
   // ---- phone-sized layout ----
   if (SHOTS) {

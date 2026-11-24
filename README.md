@@ -154,8 +154,11 @@ stays in this browser's storage on this device. Nothing is uploaded.
 To scan on a phone with tests made on a laptop, use **Import/export → Export backup**, send
 the file to the phone (AirDrop, email, Drive), and **Import** it there. Do the
 same in reverse to bring results back. Imports merge: newer edits win, and
-nothing is deleted. Backups contain student names and scores, so treat the file
-like a gradebook.
+nothing is deleted. By default a backup also includes the scanned sheet images
+(about 0.1 MB per sheet), so Review and graded copies on the other device show
+the real sheets. Untick **Include scanned sheet images** for a much smaller file.
+Backups contain student names and scores (and, with images, their answer
+sheets), so treat the file like a gradebook.
 
 ## How the scanner works
 
