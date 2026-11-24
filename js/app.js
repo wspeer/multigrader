@@ -1839,12 +1839,12 @@
       <div class="page-head"><h1>Import/export</h1></div>
       <section class="card">
         <h2>Where your data lives</h2>
-        <p>Everything (classes, tests, keys, and results) is stored <strong>only in this browser on this device</strong>. Nothing is uploaded anywhere.
+        <p>All data (classes, tests, keys, results) is stored <strong>only in this browser on this device</strong>.
           You have ${d.classes.length} class${d.classes.length === 1 ? "" : "es"}, ${d.tests.length} test${d.tests.length === 1 ? "" : "s"}, and ${d.scans.length} scanned sheet${d.scans.length === 1 ? "" : "s"} (${(size / 1024).toFixed(0)} KB).</p>
       </section>
       <section class="card">
-        <h2>Back up or move to another device</h2>
-        <p class="muted">Use this to scan on your phone with tests made on your laptop: export here, send the file to your phone (AirDrop, email, Drive), and import it there. After scanning, export from the phone and import back on the laptop. Imports <strong>merge</strong>: newer edits win, and nothing on this device is deleted.</p>
+        <h2>Back up or move to another device or browser</h2>
+        <p class="muted">Export here, then import in new device or browser. Multiple imports will merge.</p>
         <label class="check"><input type="checkbox" id="d-images" checked /> Include scanned sheet images <span class="muted small" id="d-images-size"></span></label>
         <p class="muted small">With images, Review and graded copies on the other device show the real scanned sheets. Without them the file is much smaller, and copies are drawn instead.</p>
         <div class="btn-row">
