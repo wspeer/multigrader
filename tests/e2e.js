@@ -324,6 +324,29 @@ function assert(cond, msg) { if (!cond) { throw new Error("ASSERT: " + msg); } c
     await page.click(".items [data-iq='0'][data-ic='F']");
   }
 
+  // ---- hide student scores (for showing the page to the class) ----
+  const nItems = (await page.$$(".items tbody tr")).length;
+  await page.click("#r-hide");
+  await page.waitForSelector(".notice.class-view");
+  const statLabels = () => page.$$eval(".stat-l", (els) => els.map((e) => e.textContent.trim()));
+  const allNames = await page.evaluate(() => MGStore.db.classes.flatMap((c) => c.students.flatMap((s) => [s.first, s.last])));
+  const classView = async () => {
+    const text = await page.textContent("main");
+    const labels = await statLabels();
+    assert(labels.includes("mean") && labels.includes("median") && !labels.includes("high") && !labels.includes("low"), "hidden: mean and median shown, high and low not (" + labels.join(", ") + ")");
+    assert(!allNames.some((n) => text.includes(n)), "hidden: no student's name anywhere on the page");
+    assert(!(await page.$("[data-review]")) && !(await page.$("[data-iq]")) && !(await page.$("#r-graded")) && !(await page.$("#r-csv")), "hidden: no student list, no clickable responses, no graded copies / CSV buttons");
+    assert((await page.$$(".items tbody tr")).length === nItems && (await page.$$(".items .resp")).length > 0, "hidden: item analysis still shown in full");
+  };
+  await classView();
+  await page.reload();
+  await page.waitForSelector(".notice.class-view");
+  await classView();
+  if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "results-hidden.png"), fullPage: true });
+  await page.click("#r-hide");
+  await page.waitForSelector("#r-graded");
+  assert((await statLabels()).includes("high") && (await page.$("[data-review]")) && (await page.$("[data-iq]")) && !(await page.$(".notice.class-view")), "Show student scores brings everything back");
+
   // ---- graded copies to hand back (PDF) ----
   const [gdl] = await Promise.all([page.waitForEvent("download"), page.click("#r-graded")]);
   const gfile = await gdl.path();

@@ -8,6 +8,11 @@
   const main = $("#main");
   const uiState = {}; // per-test view state that shouldn't be saved
   const ui = (t) => uiState[t.id] || (uiState[t.id] = {});
+  // "Hide student scores" on Results, for showing the page to a class. Kept on
+  // this device (until switched off) so a reload doesn't reveal the scores.
+  const HIDE_KEY = "multigrader.hideScores";
+  const scoresHidden = () => { try { return localStorage.getItem(HIDE_KEY) === "1"; } catch { return false; } };
+  const setScoresHidden = (on) => { try { on ? localStorage.setItem(HIDE_KEY, "1") : localStorage.removeItem(HIDE_KEY); } catch {} };
 
   /* ---------------- small helpers ---------------- */
 
@@ -987,6 +992,8 @@
     const qc = L.questionChoices(t);
     const vcol = (r) => hasV ? `<td>${r.g.version}${r.g.versionInferred ? `<span class="warn-txt" title="Version not bubbled clearly; graded as the best-matching version">?</span>` : ""}</td>` : "";
     const ncols = 6 + (classes.length > 1 ? 1 : 0) + (hasV ? 1 : 0);
+    // Class view: only whole-class numbers (no names, individual scores, high or low).
+    const hide = scoresHidden();
 
     main.innerHTML = `
       ${testHeader(t, "results")}
@@ -994,11 +1001,13 @@
         ${classes.length > 1 ? `<label>Class <select id="r-filter"><option value="">All classes</option>${classes.map((c) => `<option value="${c.id}" ${filter === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>` : ""}
         ${hasV ? `<label>Version <select id="r-vfilter"><option value="">All versions</option>${vlabels.map((v) => `<option value="${v}" ${vfilter === v ? "selected" : ""}>Version ${v}</option>`).join("")}</select></label>` : ""}
         <div class="spacer"></div>
-        <button class="btn" id="r-graded" ${graded.length ? "" : "disabled"} title="One graded copy per student to hand back: their own scanned sheet with the correct answers circled, ✓/✗ and their score">⬇ Graded copies of all bubble sheets (PDF)</button>
-        <button class="btn" id="r-csv" ${graded.length ? "" : "disabled"}>Export CSV</button>
+        <button class="btn ${hide ? "primary" : ""}" id="r-hide" aria-pressed="${hide}" title="${hide ? "Show the student list, individual scores, high and low again" : "Hide the student list, individual scores, high and low, so you can show this page to the class"}">${hide ? "👁 Show student scores" : "🙈 Hide student scores"}</button>
+        ${hide ? "" : `<button class="btn" id="r-graded" ${graded.length ? "" : "disabled"} title="One graded copy per student to hand back: their own scanned sheet with the correct answers circled, ✓/✗ and their score">⬇ Graded copies of all bubble sheets (PDF)</button>
+        <button class="btn" id="r-csv" ${graded.length ? "" : "disabled"}>Export CSV</button>`}
       </div>
+      ${hide ? `<div class="notice class-view">Student scores are hidden: only the class mean, median and item analysis are shown. Click <strong>👁 Show student scores</strong> to see them again.</div>` : ""}
       ${fk.some((k) => !k) ? `<div class="notice">The answer key is incomplete (${fk.filter(Boolean).length}/${fk.length}). Unkeyed questions aren't scored. <a href="#/test/${t.id}/build">Finish the key</a></div>` : ""}
-      <div class="stats">
+      <div class="stats ${hide ? "class-view" : ""}">
         ${roster.length && !vfilter
           // Students scanned out of the class; unmatched blank sheets listed separately.
           ? (() => {
@@ -1016,11 +1025,11 @@
           : `<div class="stat"><div class="stat-n">${graded.length}</div><div class="stat-p"></div><div class="stat-l">sheets scanned</div></div>`}
         ${statBox(mean, "mean")}
         ${statBox(median, "median")}
-        ${statBox(pts.length ? pts[pts.length - 1] : NaN, "high")}
-        ${statBox(pts.length ? pts[0] : NaN, "low")}
+        ${hide ? "" : `${statBox(pts.length ? pts[pts.length - 1] : NaN, "high")}
+        ${statBox(pts.length ? pts[0] : NaN, "low")}`}
       </div>
 
-      <section class="card">
+      ${hide ? "" : `<section class="card">
         <h2>Students</h2>
         ${graded.length === 0 && missing.length === 0 ? `<p class="muted">Nothing scanned yet. Go to <a href="#/test/${t.id}/scan">3 · Scan</a>.</p>` : `
         <div class="table-wrap"><table class="table">
@@ -1049,11 +1058,11 @@
             ${missing.map((x) => `<tr class="missing"><td>${esc(lastFirst(x.student))}</td>${classes.length > 1 ? `<td>${esc(x.cls.name)}</td>` : ""}<td colspan="${ncols - 1 - (classes.length > 1 ? 1 : 0)}" class="muted">not scanned</td></tr>`).join("")}
           </tbody>
         </table></div>`}
-      </section>
+      </section>`}
 
       ${graded.length ? `<section class="card">
         <h2>Item analysis</h2>
-        <p class="muted small">${hasV ? "Questions are numbered as on Version A. " : ""}Click an individual response to see which students bubbled that letter.</p>
+        ${hasV || !hide ? `<p class="muted small">${hasV ? "Questions are numbered as on Version A. " : ""}${hide ? "" : "Click an individual response to see which students bubbled that letter."}</p>` : ""}
         <div class="table-wrap"><table class="table items">
           <thead><tr><th>${sortButton("q-sort", "Q", ui(t).itemSort, "q", ["1 → last", "last → 1"], "Sort by question number: first to last, last to first, or back to question order")}</th><th>Key</th><th class="num">${sortButton("item-sort", "Correct", ui(t).itemSort, "pct", ["lowest first", "highest first"], "Sort by percent correct: lowest first, highest first, or back to question order")}</th><th>Responses</th></tr></thead>
           <tbody>${(() => {
@@ -1076,8 +1085,15 @@
             if (st && st.col === "pct") items.sort((a, b) => (isNaN(a.p) - isNaN(b.p)) || (st.dir === 1 ? a.p - b.p : b.p - a.p) || a.i - b.i);
             if (st && st.col === "q" && st.dir === 2) items.reverse();
             // Each response is a button; clicking it lists who gave that answer.
-            const open = ui(t).itemOpen;
+            const open = hide ? null : ui(t).itemOpen;
             const isOpen = (i, c) => open && open.q === i && open.c === c;
+            // In class view the counts are plain labels (no list of names).
+            if (hide) {
+              const bar = (i, c, n, isKey) => `<span class="resp ${isKey ? "key" : ""}"><b>${esc(c)}</b> ${n}<i style="width:${(100 * n) / graded.length}%"></i></span>`;
+              const other = (i, c, label, n) => `<span class="resp other">${label} ${n}</span>`;
+              return items.map(({ i, ch, ki, counts, blank, multi, p }) => `<tr class="${fk[i] && p < 50 ? "hard" : ""}"><td>${i + 1}</td><td>${esc(St.keyText(fk[i]) || "—")}${ki.all ? ` <span class="pill">all</span>` : ""}</td><td class="num">${pct(p)}</td>
+                <td class="resp-cell">${ch.map((c) => bar(i, c, counts[c] || 0, ki.letters.includes(c))).join("")}${blank ? other(i, "blank", "blank", blank) : ""}${multi ? other(i, "multiple", "multiple", multi) : ""}</td></tr>`).join("");
+            }
             const bar = (i, c, n, isKey) => `<button type="button" class="resp ${isKey ? "key" : ""} ${isOpen(i, c) ? "open" : ""}" data-iq="${i}" data-ic="${esc(c)}" title="${n} chose ${esc(c)}: click to see who"><b>${esc(c)}</b> ${n}<i style="width:${(100 * n) / graded.length}%"></i></button>`;
             const other = (i, c, label, n) => `<button type="button" class="resp other ${isOpen(i, c) ? "open" : ""}" data-iq="${i}" data-ic="${c}" title="click to see who">${label} ${n}</button>`;
             const who = (i, c, ki) => {
@@ -1098,6 +1114,7 @@
         </table></div>
       </section>` : ""}`;
 
+    $("#r-hide").onclick = () => { setScoresHidden(!hide); viewResults(t); };
     const rf = $("#r-filter");
     if (rf) rf.onchange = () => { ui(t).filter = rf.value; viewResults(t); };
     const rerender = () => { const y = window.scrollY; viewResults(t); window.scrollTo(0, y); }; // stay at the table
@@ -1128,6 +1145,7 @@
       scan.studentId = s.value; scan.updatedAt = St.now();
       St.save(); viewResults(t);
     }));
+    if (hide) return;
     $("#r-graded").onclick = async () => {
       const btn = $("#r-graded");
       const label = btn.textContent;

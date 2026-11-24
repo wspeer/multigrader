@@ -65,6 +65,12 @@ stored in your browser on your device.
      isn't on this device (it was scanned elsewhere), a clean drawn copy is used
      for that student instead.
    - Export results as CSV.
+   - **🙈 Hide student scores**, for showing the page to the class (on a
+     board or projector): hides the student list, every individual score,
+     and the high and low, and stops responses from listing who chose them.
+     The number scanned, mean, median and the full item analysis stay. It
+     stays on (even after reloading the page) until you click
+     **👁 Show student scores**.
 
 ### Versions
 
