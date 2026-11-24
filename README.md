@@ -172,10 +172,16 @@ sheets), so treat the file like a gradebook.
    code, CRC-8). A valid checksum gives the orientation and identifies the
    sheet.
 3. Aligns each column, then each block of rows, against the printed bubble
-   outlines. This handles paper that isn't perfectly flat.
+   outlines. This handles paper that isn't perfectly flat. Because every
+   bubble looks the same, the likeliest mistake is reading the whole grid one
+   bubble to the left or right, so the alignment also checks that there's no
+   outline just before the first and just after the last bubble of each row.
+   It also compares the columns with each other. A block it can't place with
+   confidence is flagged instead of guessed.
 4. Measures how dark each bubble is compared with the paper right next to it
    (so shadows don't count as marks), then decides blank / answer / multiple and
-   flags uncertain questions.
+   flags uncertain questions. A light mark that clearly stands out in its row
+   is read as the answer, but still flagged "faint" to check.
 
 The sheet layout lives in `js/layout.js` and is used by both the printer and the
 scanner, so the two can't disagree.
@@ -201,6 +207,7 @@ Run the tests (needs Node and Playwright):
 
 ```bash
 node tests/run-scanner-tests.js   # 18 synthetic photos: tilt, rotation, curl, shadow, blur, laptop webcam…
+node tests/run-stress-tests.js    # 60 random sheets × marking styles × photo conditions; no unflagged misreads
 node tests/e2e.js                 # class → test → print → fill + photograph → scan → results
 node tests/e2e-versions.js        # versions, either / all-required keys, missing version bubble
 node tests/latex-test.js          # finding and reordering questions in .tex files

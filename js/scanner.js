@@ -320,25 +320,44 @@
   for (let k = 0; k < 6; k++) INTERIOR.push([0.35 * R * Math.cos((k * Math.PI) / 3), 0.35 * R * Math.sin((k * Math.PI) / 3)]);
   for (let k = 0; k < 12; k++) INTERIOR.push([0.68 * R * Math.cos((k * Math.PI) / 6 + 0.26), 0.68 * R * Math.sin((k * Math.PI) / 6 + 0.26)]);
 
-  function outlineScore(G, H, bubbles, dx, dy) {
-    let s = 0;
-    for (const b of bubbles) {
-      const cx = b.cx + dx, cy = b.cy + dy;
+  /* How well the printed bubble outlines line up at offset (dx, dy) mm, for a
+   * set of rows. Only thin rings count (dark, with light just inside and just
+   * outside), so filled or over-filled bubbles neither help nor mislead; each
+   * sample's contribution is capped. Just before the first bubble and just
+   * past the last bubble of each row there is no outline (the question
+   * number's digits don't look like a ring): an outline found there means the
+   * grid is one bubble off, and is subtracted. Returns the average per bubble. */
+  function outlineScore(G, H, rows, dx, dy) {
+    let s = 0, n = 0;
+    const ring = (cx, cy) => {
+      let e = 0;
       for (const [c, si] of RING) {
         const on = sampleAt(G, H, cx + c * R, cy + si * R);
         const off = sampleAt(G, H, cx + c * (R + 0.75), cy + si * (R + 0.75));
         const inn = sampleAt(G, H, cx + c * (R - 0.7), cy + si * (R - 0.7));
-        s += off - on + (inn > on ? Math.min(inn - on, off - on) : 0);
+        const v = (Math.min(inn, off) - on) / Math.max(off, 1);
+        e += v > 0 ? Math.min(v, 0.35) : 0;
       }
+      return e;
+    };
+    for (const q of rows) {
+      for (const b of q.bubbles) { s += ring(b.cx + dx, b.cy + dy); n++; }
+      const first = q.bubbles[0], last = q.bubbles[q.bubbles.length - 1];
+      s -= ring(first.cx - L.PITCH_X + dx, first.cy + dy);
+      s -= ring(last.cx + L.PITCH_X + dx, last.cy + dy);
     }
-    return s;
+    return n ? s / n : 0;
   }
 
-  function searchOffset(G, H, bubbles, cx, cy, range, step, best) {
-    let b = best || { dx: cx, dy: cy, sc: outlineScore(G, H, bubbles, cx, cy) };
+  // Prefer small corrections: near-ties go to what the corner squares predict.
+  const PRIOR = 0.01;
+  const scoreAt = (G, H, rows, dx, dy) => outlineScore(G, H, rows, dx, dy) - PRIOR * (dx * dx + dy * dy);
+
+  function searchOffset(G, H, rows, cx, cy, range, step, best) {
+    let b = best || { dx: cx, dy: cy, sc: scoreAt(G, H, rows, cx, cy) };
     for (let dy = cy - range; dy <= cy + range + 1e-9; dy += step)
       for (let dx = cx - range; dx <= cx + range + 1e-9; dx += step) {
-        const sc = outlineScore(G, H, bubbles, dx, dy);
+        const sc = scoreAt(G, H, rows, dx, dy);
         if (sc > b.sc) b = { dx, dy, sc };
       }
     return b;
@@ -346,34 +365,59 @@
 
   /* Align the bubble grid against the printed outlines: first each whole
    * column (wide search), then blocks of rows within it (absorbs paper curl).
-   * Returns per-question offsets (mm) and a per-question "weak alignment" flag. */
+   * A column whose correction is about one bubble away from the other
+   * columns' is checked against the one-bubble-over alternative (identical
+   * bubbles make that the likeliest mistake). Returns per-question offsets
+   * (mm) and a per-question "weak alignment" flag. */
   function alignBlocks(G, H, layout) {
     const offsets = new Array(layout.questions.length);
     const weak = new Array(layout.questions.length).fill(false);
     const BLOCK = 8;
     const byCol = {};
     for (const q of layout.questions) (byCol[q.col] = byCol[q.col] || []).push(q);
+    const cols = Object.entries(byCol).map(([key, qs]) => ({ key, qs }));
+    for (const col of cols) {
+      // The score peak is narrow (well under a millimetre), so the coarse
+      // search uses small steps, on every third row to keep it quick.
+      const sparse = col.qs.length > 9 ? col.qs.filter((q, i) => i % 3 === 0) : col.qs;
+      let cb = searchOffset(G, H, sparse, 0, 0, 4.5, 0.375);
+      cb = searchOffset(G, H, col.qs.length > 6 ? col.qs.filter((q, i) => i % 2 === 0) : col.qs, cb.dx, cb.dy, 0.375, 0.125);
+      col.cb = cb;
+      col.sparse = sparse;
+    }
+    // Cross-check the answer columns against each other.
+    const main = cols.filter((c) => c.key !== "version");
+    if (main.length > 1) {
+      for (const col of main) {
+        const others = main.filter((c) => c !== col).map((c) => c.cb.dx).sort((a, b) => a - b);
+        const med = others[Math.floor(others.length / 2)];
+        if (Math.abs(col.cb.dx - med) <= L.PITCH_X / 2) continue;
+        const alt = col.cb.dx + (col.cb.dx > med ? -L.PITCH_X : L.PITCH_X);
+        let ab = searchOffset(G, H, col.sparse, alt, col.cb.dy, 0.75, 0.125);
+        if (ab.sc >= 0.85 * col.cb.sc) col.cb = ab;
+        else col.ambiguous = ab.sc >= 0.75 * col.cb.sc;
+      }
+    }
     const blocks = [];
-    for (const col of Object.values(byCol)) {
-      const sparse = col.filter((q, i) => i % 2 === 0).flatMap((q) => q.bubbles);
-      let cb = searchOffset(G, H, sparse, 0, 0, 4.5, 0.75);
-      cb = searchOffset(G, H, sparse, cb.dx, cb.dy, 0.75, 0.25, cb);
+    for (const col of cols) {
+      const cb = col.cb;
       let prev = { dx: cb.dx, dy: cb.dy };
-      for (let s = 0; s < col.length; s += BLOCK) {
-        const qs = col.slice(s, s + BLOCK);
-        const bubbles = qs.flatMap((q) => q.bubbles);
+      for (let s = 0; s < col.qs.length; s += BLOCK) {
+        const qs = col.qs.slice(s, s + BLOCK);
         // Start from the better of the column offset and the previous block's.
-        const a = outlineScore(G, H, bubbles, cb.dx, cb.dy), b = outlineScore(G, H, bubbles, prev.dx, prev.dy);
+        const a = scoreAt(G, H, qs, cb.dx, cb.dy), b = scoreAt(G, H, qs, prev.dx, prev.dy);
         const start = a >= b ? { dx: cb.dx, dy: cb.dy, sc: a } : { dx: prev.dx, dy: prev.dy, sc: b };
-        let best = searchOffset(G, H, bubbles, start.dx, start.dy, 2, 0.5, start);
-        best = searchOffset(G, H, bubbles, best.dx, best.dy, 0.5, 0.125, best);
+        let best = searchOffset(G, H, qs, start.dx, start.dy, 2, 0.375, start);
+        best = searchOffset(G, H, qs, best.dx, best.dy, 0.375, 0.125, best);
+        // A block may not drift a whole bubble away from its column.
+        if (Math.abs(best.dx - cb.dx) > L.PITCH_X / 2) best = searchOffset(G, H, qs, cb.dx, cb.dy, 0.5, 0.125);
         prev = best;
         for (const q of qs) offsets[q.index] = [best.dx, best.dy];
-        blocks.push({ qs, per: best.sc / bubbles.length });
+        blocks.push({ qs, per: best.sc, ambiguous: col.ambiguous });
       }
     }
     const med = percentile(blocks.map((b) => b.per), 0.5);
-    for (const b of blocks) if (b.per < 0.4 * med) for (const q of b.qs) weak[q.index] = true;
+    for (const b of blocks) if (b.per < 0.4 * med || b.ambiguous) for (const q of b.qs) weak[q.index] = true;
     return { offsets, weak };
   }
 
@@ -421,7 +465,13 @@
       const marked = order.filter((i) => d[i] >= tMark);
       let resp = "", flag = null;
       if (marked.length === 0) {
-        if (d[order[0]] >= tFaint) flag = "faint";
+        if (d[order[0]] >= tFaint) {
+          flag = "faint";
+          // A light or half-filled mark that clearly stands out from the rest
+          // of the row is read as the answer (still flagged for checking).
+          const d1 = d[order[0]] - B, d2 = order.length > 1 ? Math.max(0, d[order[1]] - B) : 0;
+          if (d1 >= 0.12 && d1 >= 3 * d2) resp = q.bubbles[order[0]].label;
+        }
       } else if (marked.length === 1) {
         resp = q.bubbles[marked[0]].label;
         if (order.length > 1 && d[order[1]] >= tFaint) flag = "erasure";
@@ -522,5 +572,5 @@
     return out;
   }
 
-  root.MGScanner = { scan, toGray, solveHomography, project, rectify, _internal: { findMarkerCandidates, downscale, classify, readCode } };
+  root.MGScanner = { scan, toGray, solveHomography, project, rectify, _internal: { findMarkerCandidates, downscale, classify, readCode, outlineScore, alignBlocks } };
 })(typeof window !== "undefined" ? window : globalThis);

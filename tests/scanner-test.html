@@ -225,6 +225,143 @@ window.makePhoto = async function (svg, test, answers, cs) {
   return photo.toDataURL("image/jpeg", 0.8);
 };
 
+/* ---------- randomized stress test ----------
+ * Many sheets with varied, realistic marking and photo conditions. Reports
+ * every misread, split into flagged (the app asks the teacher to check it)
+ * and silent (would go into the grade unnoticed). */
+
+function markBubble(ctx, k, b, rand, style) {
+  const R = L.BUBBLE_R;
+  const dark = (a) => { const g = 30 + rand() * 50; return `rgba(${g},${g},${g + 5},${a})`; };
+  ctx.save();
+  if (style === "solid") pencil(ctx, k, b.cx, b.cy, R * 0.95, rand, 0.85 + rand() * 0.15);
+  else if (style === "light") pencil(ctx, k, b.cx, b.cy, R * 0.95, rand, 0.4 + rand() * 0.2);
+  else if (style === "partial") pencil(ctx, k, b.cx + (rand() - 0.5) * 0.8, b.cy + (rand() - 0.5) * 0.8, R * (0.55 + rand() * 0.2), rand, 0.85);
+  else if (style === "offcenter") pencil(ctx, k, b.cx + (rand() - 0.5) * 2.2, b.cy + (rand() - 0.5) * 1.6, R * 0.9, rand, 0.85);
+  else if (style === "pen") { ctx.fillStyle = dark(0.95); ctx.beginPath(); ctx.arc(b.cx * k, b.cy * k, R * (0.6 + rand() * 0.25) * k, 0, 7); ctx.fill(); }
+  else if (style === "scribble") {
+    ctx.strokeStyle = dark(0.8); ctx.lineWidth = (0.45 + rand() * 0.3) * k;
+    ctx.beginPath();
+    for (let i = 0; i < 9; i++) {
+      const y = b.cy - R * 0.8 + (i * R * 1.6) / 8;
+      ctx.lineTo((b.cx + (i % 2 ? 1 : -1) * R * (0.6 + rand() * 0.3)) * k, y * k);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function photographStress(page, outW, outH, corners, rand, o) {
+  const c = photograph(page, outW, outH, corners, rand, o);
+  const ctx = c.getContext("2d");
+  if (o.motion) { // camera shake: average a few shifted copies
+    const c2 = document.createElement("canvas"); c2.width = outW; c2.height = outH;
+    const x2 = c2.getContext("2d"); x2.drawImage(c, 0, 0);
+    ctx.globalAlpha = 0.35;
+    for (let i = 1; i <= 3; i++) ctx.drawImage(c2, (o.motion * i) / 3 * Math.cos(o.motionAng), (o.motion * i) / 3 * Math.sin(o.motionAng));
+    ctx.globalAlpha = 1;
+  }
+  if (o.glare) { // bright reflection somewhere on the sheet
+    const [gx, gy, gr] = o.glare;
+    const g = ctx.createRadialGradient(gx * outW, gy * outH, 0, gx * outW, gy * outH, gr * outW);
+    g.addColorStop(0, "rgba(255,255,255,0.75)"); g.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, outW, outH);
+  }
+  return c;
+}
+
+async function stressCase(seed) {
+  const rand = rng(seed * 7919 + 13);
+  const pick = (arr) => arr[Math.floor(rand() * arr.length)];
+  const between = (a, b) => a + rand() * (b - a);
+  const sections = pick([
+    [{ count: 10, type: "TF" }, { count: 20, type: "AE" }],
+    [{ count: 10, type: "TF" }, { count: 4, type: "ASN" }, { count: 10, type: "AC" }, { count: 6, type: "AE" }],
+    [{ count: 15, type: "AD" }, { count: 25, type: "AE" }, { count: 10, type: "TF" }],
+    [{ count: 30, type: "AE" }, { count: 30, type: "AE" }, { count: 20, type: "AD" }],
+  ]);
+  const test = { title: "Stress", sections, versionCount: rand() < 0.3 ? 2 : 1 };
+  const layout = L.computeLayout(test);
+  const testCode = 1 + Math.floor(rand() * 65000), sheetCode = 1 + Math.floor(rand() * 4000);
+  const svg = L.renderSheetSVG(test, { testCode, sheetCode, studentName: "Pat Example", className: "Period 1" });
+  const k = 6;
+  const page = await svgToCanvas(svg, k);
+  const pctx = page.getContext("2d");
+  const sheetStyle = pick(["solid", "solid", "solid", "light", "mixed", "mixed"]);
+  const expected = [];
+  for (const q of layout.questions) {
+    const r = rand();
+    let ans = "";
+    if (r < 0.06) ans = "";
+    else if (r < 0.09 && q.bubbles.length > 2) {
+      const a = Math.floor(rand() * q.bubbles.length), b2 = (a + 1 + Math.floor(rand() * (q.bubbles.length - 1))) % q.bubbles.length;
+      ans = [q.bubbles[a].label, q.bubbles[b2].label].sort().join("");
+    } else ans = q.bubbles[Math.floor(rand() * q.bubbles.length)].label;
+    const style = sheetStyle === "mixed" ? pick(["solid", "solid", "light", "partial", "offcenter", "pen", "scribble"]) : sheetStyle;
+    for (const b of q.bubbles) if (ans.includes(b.label)) markBubble(pctx, k, b, rand, style);
+    if (ans.length === 1 && rand() < 0.08) { // erasure residue on another bubble
+      const other = q.bubbles.find((b) => b.label !== ans);
+      pencil(pctx, k, other.cx, other.cy, L.BUBBLE_R * 0.9, rand, between(0.1, 0.25));
+    }
+    if (rand() < 0.04) { // stray pencil mark near the row
+      pctx.strokeStyle = "rgba(60,60,60,0.7)"; pctx.lineWidth = 0.4 * k;
+      const b = pick(q.bubbles), x = b.cx + between(-3, 3), y = q.cy + between(-3.3, 3.3);
+      pctx.beginPath(); pctx.moveTo(x * k, y * k); pctx.lineTo((x + between(-3, 3)) * k, (y + between(-1, 1)) * k); pctx.stroke();
+    }
+    expected.push(ans);
+  }
+  if (layout.versionRow) markBubble(pctx, k, layout.versionRow.bubbles[0], rand, "solid");
+  const size = pick([[1280, 720], [1920, 1080], [2250, 3000], [3024, 4032]]);
+  const [outW, outH] = size;
+  const rot = Math.floor(rand() * 4);
+  const o = {
+    noise: between(2, 12), blur: rand() < 0.6 ? between(0, 1.8) : 0, light: rand() < 0.5 ? between(0, 0.5) : 0,
+    shadow: rand() < 0.15 ? between(0.3, 0.7) : 0, bow: rand() < 0.5 ? between(0, 4) : 0,
+    motion: rand() < 0.2 ? between(1, 4) : 0, motionAng: rand() * 6.28,
+    glare: rand() < 0.15 ? [between(0.3, 0.7), between(0.3, 0.7), between(0.05, 0.15)] : null,
+  };
+  const pw = page.width, ph = page.height;
+  const landscape = rot % 2 === 1;
+  const fill = outW < 2000 ? between(0.55, 0.97) : between(0.6, 0.92);
+  const s = Math.min(outW / (landscape ? ph : pw), outH / (landscape ? pw : ph)) * fill;
+  const ang = rot * Math.PI / 2 + between(-10, 10) * Math.PI / 180, persp = between(0, 0.05);
+  const cx = outW / 2, cy = outH / 2;
+  const corners = [[-pw / 2, -ph / 2], [pw / 2, -ph / 2], [pw / 2, ph / 2], [-pw / 2, ph / 2]].map(([x, y]) => [
+    cx + (x * Math.cos(ang) - y * Math.sin(ang)) * s + (rand() - 0.5) * persp * outW,
+    cy + (x * Math.sin(ang) + y * Math.cos(ang)) * s + (rand() - 0.5) * persp * outH]);
+  let photo = photographStress(page, outW, outH, corners, rand, o);
+  photo = await jpegRoundTrip(photo, between(0.55, 0.9));
+  // The app shrinks big photos to 2600 px before scanning; do the same.
+  let data;
+  const kk = Math.min(1, 2600 / Math.max(outW, outH));
+  if (kk < 1) {
+    const c2 = document.createElement("canvas"); c2.width = Math.round(outW * kk); c2.height = Math.round(outH * kk);
+    c2.getContext("2d").drawImage(photo, 0, 0, c2.width, c2.height);
+    data = c2.getContext("2d").getImageData(0, 0, c2.width, c2.height);
+  } else data = photo.getContext("2d").getImageData(0, 0, outW, outH);
+  const res = S.scan(data, { getTest: (c) => (c === testCode ? test : null) });
+  window.__dbg = { data, res, test };
+  const params = { seed, size: size.join("x"), fill: +fill.toFixed(2), rot, style: sheetStyle, ...Object.fromEntries(Object.entries(o).filter(([, v]) => v).map(([kk2, v]) => [kk2, Array.isArray(v) ? v.map((x) => +x.toFixed(2)) : +(+v).toFixed(2)])) };
+  if (res.status !== "ok") return { params, status: res.status, n: expected.length };
+  const errs = [];
+  expected.forEach((e, i) => {
+    const got = res.responses[i];
+    if (got === e) return;
+    const flagged = !!res.flags[i] || got === "";
+    errs.push({ q: i + 1, want: e, got, flag: res.flags[i] || (got === "" ? "blank" : null), silent: !flagged, d: res.darkness[i] });
+  });
+  // For debugging: where the corner squares really are in the scanned image.
+  const Hg = S.solveHomography([[0, 0], [pw, 0], [pw, ph], [0, ph]], corners);
+  const truth = ["tl", "tr", "br", "bl"].map((c) => S.project(Hg, L.FIDUCIALS[c][0] * k, L.FIDUCIALS[c][1] * k).map((v) => Math.round(v * kk)));
+  return { params, status: "ok", n: expected.length, errs, stats: res.stats, ms: res.ms, offsets: res.offsets, corners: res.corners.map((p) => p.map(Math.round)), truth, nq: layout.questions.map((q) => q.col) };
+}
+
+window.runStress = async function (n, start) {
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(await stressCase((start || 1) + i));
+  return out;
+};
+
 window.runTests = async function (only) {
   const results = [];
   for (const cs of window.CASES) {
