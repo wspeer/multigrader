@@ -265,7 +265,7 @@
             <p class="muted small">Type answers into a section's box (e.g. <code>TFFTF</code> or <code>CADBE</code>), or click bubbles.
               For more than one letter, shift-click or type: <code>(AC)</code> = <strong>either</strong> A or C earns credit;
               <code>[AC]</code> = <strong>all required</strong> (the student must bubble exactly A and C; no partial credit).
-              Click the small tag on a row to switch between the two. You can change the key after scanning; scores update automatically.</p>
+              Click the small tag on a row to switch between the two. If you change the key after scanning, scores will update automatically.</p>
             <div id="key-grid"></div>
           </section>
 
@@ -373,7 +373,7 @@
     const pts = St.questionPoints(t).reduce((a, b) => a + b, 0);
     const lay = L.computeLayout(t);
     const el = $("#format-summary");
-    if (el) el.innerHTML = lay.error ? `<span class="bad-txt">${esc(lay.error)}</span>` : `${nq} questions · ${fmtPts(pts)} points · ${lay.columns.length} column${lay.columns.length === 1 ? "" : "s"} on the sheet`;
+    if (el) el.innerHTML = lay.error ? `<span class="bad-txt">${esc(lay.error)}</span>` : `${nq} questions · ${fmtPts(pts)} points · ${lay.columns.length} column${lay.columns.length === 1 ? "" : "s"}`;
   }
 
   /* --- answer key --- */
@@ -672,7 +672,7 @@
         </label>
       </div>
       ${locked ? `<p class="muted small">The number of versions changes the printed sheet, so it's locked once sheets are printed (see Question format).</p>` : ""}
-      ${labels.length < 2 ? `<p class="muted small">Use versions to give students the same questions in a different order. Each sheet gets a VERSION row for students to bubble, each sheet is graded with its version's key, and results and item analysis use Version A's question numbers.</p>` : `
+      ${labels.length < 2 ? `<p class="muted small">Same questions, different order. Each sheet gets a VERSION row for students to bubble, each sheet is graded with its version's key, and results and item analysis use Version A's question numbers.</p>` : `
       <p class="muted small">Version A uses the order above. For each other version, list the <strong>Version A question numbers in the order they appear on that version</strong>, or click Shuffle.
         Questions can move only within their own section, so every version uses the same answer sheet. Students bubble their version at the top of the sheet; if they forget, the sheet is graded as the version that fits best and flagged for you.</p>
       ${texPanel(t, labels)}
@@ -855,11 +855,11 @@
               <label>Extra blank sheets <span class="muted small">(student writes their name)</span>
                 <input id="p-blanks" type="number" min="0" max="60" value="${sel.blanks}" /></label>
             </div>
-            <label class="check"><input type="checkbox" id="p-key" ${sel.key ? "checked" : ""}/> Also include ${L.versionLabels(t).length > 1 ? "an answer-key sheet for each version" : "an answer-key sheet"} <span class="muted small">(scan it to double-check your key — it's never recorded as a student)</span></label>
+            <label class="check"><input type="checkbox" id="p-key" ${sel.key ? "checked" : ""}/> Include ${L.versionLabels(t).length > 1 ? "an answer-key sheet for each version" : "an answer-key sheet"}</label>
             <div class="print-go">
               <button class="btn primary big" id="p-pdf" ${lay.error ? "disabled" : ""}>⬇ Download PDF</button>
             </div>
-            <p class="muted small">One PDF with every sheet, each on its own Letter-size page. Open it and print at <strong>Actual size</strong> (100%), or send it to your copy room.</p>
+            <p class="muted small">One page per student, letter-size. Print at <strong>Actual Size</strong> (100%).</p>
             <details class="help">
               <summary>Printing tips</summary>
               <ul>
