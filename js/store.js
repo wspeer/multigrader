@@ -82,7 +82,7 @@
     const t = {
       id: uid(),
       code: newTestCode(),
-      title: "Untitled test",
+      title: "",
       date: today(),
       classIds: db.classes.length === 1 ? [db.classes[0].id] : [],
       sections: [{ id: uid(), count: 10, type: "AE", points: 1, key: [] }],
@@ -98,7 +98,7 @@
 
   function duplicateTest(src) {
     const t = JSON.parse(JSON.stringify(src));
-    Object.assign(t, { id: uid(), code: newTestCode(), title: src.title + " (copy)", sheets: [], nextSheet: 1, createdAt: now(), updatedAt: now() });
+    Object.assign(t, { id: uid(), code: newTestCode(), title: (src.title || "Untitled test") + " (copy)", sheets: [], nextSheet: 1, createdAt: now(), updatedAt: now() });
     const orders = t.versionOrders || {};
     t.versionOrders = {};
     t.sections.forEach((s) => {

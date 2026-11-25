@@ -88,7 +88,7 @@ you can check it against your printed test.
 - If a student leaves the version blank (or bubbles two), the sheet is graded as
   the version that fits best and flagged. You can change the version in Review.
 - The answer-key sheet option prints one key sheet per version.
-- **Keep in place:** Version A question numbers listed here never move when
+- **(Optional) Keep these questions in the same position:** Version A question numbers listed here never move when
   shuffling, for example questions that share a figure.
 - **Shuffle, Undo, Lock:** every Shuffle gives a new order, and **↶ Undo**
   goes back one step. When you're happy with a version, click **Lock order**.

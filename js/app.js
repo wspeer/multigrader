@@ -8,6 +8,7 @@
   const main = $("#main");
   const uiState = {}; // per-test view state that shouldn't be saved
   const ui = (t) => uiState[t.id] || (uiState[t.id] = {});
+  const ttl = (t) => (t.title && t.title.trim()) || "Untitled test";
   // "Hide individual scores" on Results, for showing the page to a class. Kept on
   // this device (until switched off) so a reload doesn't reveal the scores.
   const HIDE_KEY = "multigrader.hideScores";
@@ -181,7 +182,7 @@
     $$("[data-del]").forEach((b) => (b.onclick = () => {
       const t = St.getTest(b.dataset.del);
       const n = St.scansFor(t).length;
-      if (confirm(`Delete "${t.title}"${n ? ` and its ${n} scanned sheet${n > 1 ? "s" : ""}` : ""}? This can't be undone.`)) { St.deleteTest(t); viewTests(); }
+      if (confirm(`Delete "${ttl(t)}"${n ? ` and its ${n} scanned sheet${n > 1 ? "s" : ""}` : ""}? This can't be undone.`)) { St.deleteTest(t); viewTests(); }
     }));
   }
 
@@ -198,7 +199,7 @@
     return `
       <div class="card test-card">
         <div class="tc-main">
-          <a class="tc-title" href="#/test/${t.id}/build">${esc(t.title)}</a>
+          <a class="tc-title" href="#/test/${t.id}/build">${esc(ttl(t))}</a>
           <div class="muted small">${esc(fmtDate(t.date))}${classNames(t) ? " · " + esc(classNames(t)) : ""}</div>
           <div class="tc-meta">
             <span class="pill">${nq} question${nq === 1 ? "" : "s"}</span>
@@ -221,7 +222,7 @@
     return `
       <div class="test-head">
         <a class="back" href="#/tests">← Tests</a>
-        <h1 id="th-title">${esc(t.title)}</h1>
+        <h1 id="th-title">${esc(ttl(t))}</h1>
         <nav class="subnav">
           <a href="#/test/${t.id}/build" class="${sub === "build" ? "active" : ""}">1 · Build</a>
           <a href="#/test/${t.id}/print" class="${sub === "print" ? "active" : ""}">2 · Print</a>
@@ -244,7 +245,7 @@
           <section class="card">
             <h2>Details</h2>
             <div class="form-row">
-              <label class="grow">Title <input id="t-title" value="${esc(t.title)}" /></label>
+              <label class="grow">Title <input id="t-title" value="${esc(t.title)}" placeholder="Untitled test" /></label>
               <label>Date <input id="t-date" type="date" value="${esc(t.date)}" /></label>
             </div>
             <div class="field">
@@ -280,7 +281,7 @@
         </aside>
       </div>`;
 
-    $("#t-title").oninput = (e) => { t.title = e.target.value; $("#th-title").textContent = t.title || "Untitled test"; saveSoon(t); updatePreview(t); };
+    $("#t-title").oninput = (e) => { t.title = e.target.value; $("#th-title").textContent = ttl(t); saveSoon(t); updatePreview(t); };
     $("#t-date").onchange = (e) => { t.date = e.target.value; saveSoon(t); updatePreview(t); };
     $$("[data-class]").forEach((cb) => (cb.onchange = () => {
       const id = cb.dataset.class;
@@ -710,15 +711,14 @@
     return `
       <div class="tex-box">
         <div class="ver-head"><strong>From your LaTeX or Word file</strong></div>
-        <p class="muted small">Upload Version A as a LaTeX (<code>.tex</code>) or Word (<code>.docx</code>) file. For each version you get a new file with the questions in that version's order, and that version's key is set automatically.
-          Answer choices, pictures and equations move with their question; page breaks and headings between questions stay where they are.</p>
+        <p class="muted small">Upload Version A as a LaTeX (<code>.tex</code>) or Word (<code>.docx</code>) file. For each version you get a new file with the questions in that version's order, and that version's key is set automatically. Answer choices will stay the same.</p>
         <div class="btn-row">
           <label class="btn" for="tex-in">${tex ? "Upload a different file…" : "Upload Version A (.tex or .docx)…"}</label>
           <input type="file" id="tex-in" accept=".tex,.docx,text/x-tex,application/x-tex,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" class="visually-hidden" />
         </div>
         ${body}
         <div class="form-row tex-fixed">
-          <label class="grow">Keep in place when shuffling <span class="muted small">(Version A numbers, e.g. questions that share a figure)</span>
+          <label class="grow">(Optional) Keep these questions in the same position when shuffling
             <input id="tex-fixed" value="${esc(fixed)}" placeholder="e.g. 12 13 14" inputmode="numeric" /></label>
         </div>
       </div>`;
@@ -737,10 +737,9 @@
           <select id="v-count" ${locked ? "disabled" : ""}>${L.VERSION_LABELS.map((l, i) => `<option value="${i + 1}" ${labels.length === i + 1 ? "selected" : ""}>${i === 0 ? "1 (no versions)" : `${i + 1} (A–${l})`}</option>`).join("")}</select>
         </label>
       </div>
-      ${locked ? `<p class="muted small">The number of versions changes the printed sheet, so it's locked once sheets are printed (see Question format).</p>` : ""}
+      ${locked ? `<p class="muted small">Once answer sheets are printed, the number of versions is locked.</p>` : ""}
       ${labels.length < 2 ? `<p class="muted small">Same questions, different order. Each sheet gets a VERSION row for students to bubble, each sheet is graded with its version's key, and results and item analysis use Version A's question numbers.</p>` : `
-      <p class="muted small">Version A uses the order above. For each other version, list the <strong>Version A question numbers in the order they appear on that version</strong>, or click Shuffle.
-        Questions can move only within their own section, so every version uses the same answer sheet. Students bubble their version at the top of the sheet; if they forget, the sheet is graded as the version that fits best and flagged for you.</p>
+      <p class="muted small">Version A uses the answer key that's set above. For other versions, list the Version A question numbers in a new order, or click Shuffle. Questions will only move within their own section.</p>
       ${texPanel(t, labels)}
       ${labels.slice(1).map((v) => {
         const vLocked = verLocked(t, v);
@@ -1017,8 +1016,8 @@
       const label = btn.textContent;
       btn.textContent = "Making PDF…";
       try {
-        const blob = await MGPdf.sheetsToPDF(sheetOpts().map((o) => L.sheetOps(t, o)), { title: `${t.title} — answer sheets` });
-        const name = `${safeFileName(t.title)} - answer sheets.pdf`;
+        const blob = await MGPdf.sheetsToPDF(sheetOpts().map((o) => L.sheetOps(t, o)), { title: `${ttl(t)} — answer sheets` });
+        const name = `${safeFileName(ttl(t))} - answer sheets.pdf`;
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
         a.download = name;
@@ -1249,7 +1248,7 @@
         let drawn = 0;
         for (const r of graded) {
           const o = {
-            title: t.title, date,
+            title: ttl(t), date,
             studentName: r.student ? St.studentName(r.student) : `Blank sheet #${r.scan.sheetCode}`,
             className: r.cls ? r.cls.name : "",
             version: hasV ? r.g.version : null,
@@ -1261,10 +1260,10 @@
           if (bytes && MGPdf.jpegInfo(bytes)) pages.push(L.gradedScanOps(t, { ...o, image: bytes, offsets: r.scan.offsets }));
           else { pages.push(L.gradedSheetOps(t, o)); drawn++; }
         }
-        const blob = await MGPdf.sheetsToPDF(pages, { title: `${t.title} — graded copies` });
+        const blob = await MGPdf.sheetsToPDF(pages, { title: `${ttl(t)} — graded copies` });
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
-        a.download = `${safeFileName(t.title)} - graded copies.pdf`;
+        a.download = `${safeFileName(ttl(t))} - graded copies.pdf`;
         document.body.appendChild(a);
         a.click();
         setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
@@ -1291,7 +1290,7 @@
       }
       lines.push(["", "KEY", ...(hasForm ? [""] : []), "", ...(hasV ? ["A"] : []), "", "", "", ...fk.map(quick)]);
       const csv = lines.map((l) => l.map((v) => /[",\n]/.test(v) ? `"${String(v).replace(/"/g, '""')}"` : v).join(",")).join("\n");
-      download(`${safeFileName(t.title)} results.csv`, csv, "text/csv");
+      download(`${safeFileName(ttl(t))} results.csv`, csv, "text/csv");
     };
   }
 
@@ -1350,7 +1349,7 @@
           <div class="modal-head">
             <div>
               <h2>${f ? esc(St.studentName(f.student)) : `Blank sheet #${scan.sheetCode}`}</h2>
-              <div class="muted small">${esc(t.title)} · scanned ${fmtTime(scan.scannedAt)}</div>
+              <div class="muted small">${esc(ttl(t))} · scanned ${fmtTime(scan.scannedAt)}</div>
             </div>
             <div class="score-big">${fmtPts(g.score)}/${fmtPts(g.possible)} <span>${pct(g.pct)}</span></div>
             <button class="icon-btn" id="m-close" title="Close">✕</button>
@@ -1634,7 +1633,7 @@
             <canvas id="overlay"></canvas>
             <div id="flash" class="flash"></div>
           </div>
-          <div id="scan-status" class="scan-status">${t ? `Scan the sheets for <strong>${esc(t.title)}</strong>, in any order. (A sheet from another test is recorded for that test.)` : "Any sheet from any of your tests can be scanned here, in any order; each sheet's code tells MultiGrader which test and student it is."}</div>
+          <div id="scan-status" class="scan-status">${t ? `Scan the sheets for <strong>${esc(ttl(t))}</strong>, in any order. (A sheet from another test is recorded for that test.)` : "Any sheet from any of your tests can be scanned here, in any order; each sheet's code tells MultiGrader which test and student it is."}</div>
           <details class="help">
             <summary>Tips for clean scans</summary>
             <ul>
@@ -1855,10 +1854,10 @@
     const who = f ? St.studentName(f.student) : `Blank sheet #${scan.sheetCode}`;
     const nflag = St.flagCount(scan, g);
     const ver = L.versionLabels(t).length > 1 ? ` · version ${g.version}${g.versionInferred ? "?" : ""}` : "";
-    const entry = { scanId: scan.id, who, test: t.title + ver, g, nflag, replaced, at: Date.now(), source: fileName || source };
+    const entry = { scanId: scan.id, who, test: ttl(t) + ver, g, nflag, replaced, at: Date.now(), source: fileName || source };
     session.unshift(entry);
     if (source === "camera") {
-      setStatus(`<strong>✓ ${esc(who)}</strong> · ${esc(t.title + ver)} · ${fmtPts(g.score)}/${fmtPts(g.possible)} (${pct(g.pct)})${nflag ? ` · <span class="warn-txt">${nflag} to check</span>` : ""}${replaced ? " · replaced earlier scan" : ""}<br><span class="muted small">Next sheet…</span>`, "good");
+      setStatus(`<strong>✓ ${esc(who)}</strong> · ${esc(ttl(t) + ver)} · ${fmtPts(g.score)}/${fmtPts(g.possible)} (${pct(g.pct)})${nflag ? ` · <span class="warn-txt">${nflag} to check</span>` : ""}${replaced ? " · replaced earlier scan" : ""}<br><span class="muted small">Next sheet…</span>`, "good");
       beep(true); flash(true);
     }
     renderSessionList();

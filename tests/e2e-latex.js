@@ -118,6 +118,7 @@ function assert(cond, msg) { if (!cond) throw new Error("ASSERT: " + msg); conso
   await page.goto(base + "/#/tests");
   await page.click("#new-test");
   await page.waitForSelector("#t-title");
+  assert((await page.inputValue("#t-title")) === "" && (await page.getAttribute("#t-title", "placeholder")) === "Untitled test" && (await page.textContent("#th-title")).trim() === "Untitled test", "new test: title box empty with an 'Untitled test' hint; heading says Untitled test");
   await page.selectOption(".sec-row[data-i='0'] .sec-type", "TF");
   await page.fill(".sec-row[data-i='0'] .sec-count", "3");
   await page.dispatchEvent(".sec-row[data-i='0'] .sec-count", "change");
