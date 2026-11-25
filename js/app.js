@@ -683,12 +683,12 @@
         <div class="ver-block ${vLocked ? "locked" : ""}" data-v="${v}">
           <div class="ver-head"><strong>Version ${v}</strong>
             ${vLocked
-              ? `<span class="pill lock-pill">🔒 Order locked</span>
+              ? `<span class="pill lock-pill">Order locked</span>
                  <button class="btn small ghost" data-unlock>Unlock…</button>`
               : `<button class="btn small" data-shuffle>Shuffle</button>
                  ${canUndo ? `<button class="btn small ghost" data-undo title="Go back to the order before the last change">↶ Undo</button>` : ""}
                  <button class="btn small ghost" data-same>Same as A</button>
-                 <button class="btn small" data-lock title="Keep this order: Shuffle and editing are turned off until you unlock">🔒 Lock order</button>`}
+                 <button class="btn small" data-lock title="Keep this order: Shuffle and editing are turned off until you unlock">Lock order</button>`}
             ${ui(t).tex ? `<span class="spacer"></span><button class="btn small primary" data-texdl ${texCheck(t).ok ? "" : "disabled"}>⬇ Version ${v} .tex</button>` : ""}</div>
           ${t.sections.map((s, si) => {
             const r = ranges[si];
