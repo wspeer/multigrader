@@ -157,16 +157,26 @@
 
   // Text runs in order: w:t (document text), m:t (Word equations), tabs.
   const TEXT_RE = /<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>|<w:t(?:\s[^>]*)?\/>|<m:t(?:\s[^>]*)?>([^<]*)<\/m:t>|<w:tab\/>/g;
+  // Text boxes (and the copy of a drawing kept for old Word versions) aren't
+  // part of the paragraph's own text.
+  const HIDDEN_RE = /<mc:Fallback\b[^>]*>[\s\S]*?<\/mc:Fallback>|<w:txbxContent\b[^>]*>[\s\S]*?<\/w:txbxContent>/g;
+  function mask(xml) {
+    const saved = [];
+    const masked = xml.replace(HIDDEN_RE, (m) => { saved.push(m); return `\u0000${saved.length - 1}\u0000`; });
+    return { masked, restore: (x) => x.replace(/\u0000(\d+)\u0000/g, (m, i) => saved[+i]) };
+  }
   function textOf(xml) {
     let s = "";
-    for (const m of xml.matchAll(TEXT_RE)) s += m[0] === "<w:tab/>" ? "\t" : decodeXml(m[1] || m[2] || "");
+    for (const m of xml.replace(HIDDEN_RE, "").matchAll(TEXT_RE)) s += m[0] === "<w:tab/>" ? "\t" : decodeXml(m[1] || m[2] || "");
     return s;
   }
+  // A table's text, one line per paragraph.
+  const tableText = (xml) => xml.split(/<\/w:p>/).map(textOf).join("\n");
   // For previews: also show where equation objects and pictures are.
   const PREVIEW_RE = new RegExp(TEXT_RE.source + "|<w:object\\b|<w:drawing\\b|<w:pict\\b", "g");
   function previewOf(xml) {
     let s = "";
-    for (const m of xml.matchAll(PREVIEW_RE)) {
+    for (const m of xml.replace(HIDDEN_RE, "").matchAll(PREVIEW_RE)) {
       if (m[0] === "<w:tab/>") s += " ";
       else if (m[0] === "<w:object") s += " ▢ ";
       else if (m[0] === "<w:drawing" || m[0] === "<w:pict") s += " [picture] ";
@@ -199,9 +209,12 @@
     const content = [...xml.matchAll(CONTENT_RE)].map((m) => m.index);
     info.hasContent = content.length > 0;
     info.breakOnly = brs.length > 0 && !content.length;
-    info.leadBreak = brs.length > 0 && content.length > 0 && brs[0] < content[0] && /<w:pageBreakBefore\s*\/>/.test(pPr) === false;
-    info.trailBreak = brs.length > 0 && content.length > 0 && brs[brs.length - 1] > content[content.length - 1];
-    if (/<w:pageBreakBefore(?:\s+w:val="(?:1|true|on)")?\s*\/>/.test(pPr)) info.pbBefore = true;
+    info.pbBefore = /<w:pageBreakBefore(?:\s+w:val="(?:1|true|on)")?\s*\/>/.test(pPr);
+    // Page breaks before the first content (counting "page break before") and after the last.
+    info.leadN = content.length ? brs.filter((b) => b < content[0]).length + (info.pbBefore ? 1 : 0) : 0;
+    info.trailN = content.length ? brs.filter((b) => b > content[content.length - 1]).length : 0;
+    info.leadBreak = info.leadN > 0 && !info.pbBefore;
+    info.trailBreak = info.trailN > 0;
     return info;
   }
 
@@ -218,13 +231,20 @@
     const numbering = await get("word/numbering.xml");
     const styles = await get("word/styles.xml");
     // numId → abstractNumId, and each abstract list's number format per level.
-    const nums = {}, absFmt = {};
+    const nums = {}, absFmt = {}, absStart = {}, restart = {};
     if (numbering) {
       for (const m of numbering.matchAll(/<w:abstractNum\b[^>]*w:abstractNumId="(\d+)"[^>]*>([\s\S]*?)<\/w:abstractNum>/g)) {
         absFmt[m[1]] = {};
-        for (const l of m[2].matchAll(/<w:lvl\b[^>]*w:ilvl="(\d+)"[^>]*>([\s\S]*?)<\/w:lvl>/g)) absFmt[m[1]][l[1]] = (l[2].match(/<w:numFmt w:val="(\w+)"/) || [])[1];
+        for (const l of m[2].matchAll(/<w:lvl\b[^>]*w:ilvl="(\d+)"[^>]*>([\s\S]*?)<\/w:lvl>/g)) {
+          absFmt[m[1]][l[1]] = (l[2].match(/<w:numFmt w:val="(\w+)"/) || [])[1];
+          if (l[1] === "0") absStart[m[1]] = +((l[2].match(/<w:start w:val="(\d+)"/) || [])[1] || 1);
+        }
       }
-      for (const m of numbering.matchAll(/<w:num\b[^>]*w:numId="(\d+)"[^>]*>([\s\S]*?)<\/w:num>/g)) nums[m[1]] = (m[2].match(/<w:abstractNumId w:val="(\d+)"/) || [])[1];
+      for (const m of numbering.matchAll(/<w:num\b[^>]*w:numId="(\d+)"[^>]*>([\s\S]*?)<\/w:num>/g)) {
+        nums[m[1]] = (m[2].match(/<w:abstractNumId w:val="(\d+)"/) || [])[1];
+        const so = m[2].match(/<w:lvlOverride w:ilvl="0"\s*>[\s\S]*?<w:startOverride w:val="(\d+)"/);
+        if (so) restart[m[1]] = +so[1];
+      }
     }
     const styleNum = {};
     if (styles) {
@@ -239,23 +259,28 @@
     const kids = children(docXml, bodyOpen + 8, bodyClose).map((c) => {
       const xml = docXml.slice(c.s, c.e);
       if (c.tag === "w:p") return { ...c, kind: "p", ...paraInfo(xml, styleNum) };
-      return { ...c, kind: c.tag === "w:tbl" ? "tbl" : c.tag === "w:sectPr" ? "sectPr" : "other", xml, text: textOf(xml), hasContent: true, pic: PIC_RE.test(xml) };
+      // Tables, content controls, and markers such as bookmarks between paragraphs.
+      const hasContent = CONTENT_RE.test(xml);
+      CONTENT_RE.lastIndex = 0;
+      return { ...c, kind: c.tag === "w:tbl" ? "tbl" : c.tag === "w:sectPr" ? "sectPr" : "other", xml, text: tableText(xml), hasContent, pic: PIC_RE.test(xml) };
     });
     const fmt = (numId, ilvl) => (absFmt[nums[numId]] || {})[ilvl];
     const extra = [];
     for (const e of entries) if (/^word\/(header|footer)\d*\.xml$/.test(e.name)) extra.push({ name: e.name, xml: await get(e.name) });
-    return { entries, docXml, kids, fmt, nums, extra };
+    return { entries, docXml, kids, fmt, nums, absStart, restart, extra };
   }
 
   /* ---------------- find questions ---------------- */
 
-  const TYPED_RE = /^\s*(\d{1,3})\s*(?:[.):]|\t)/;
+  // "1." "1)" "(1)" "1:" "1<tab>", or "Question 1" / "Problem 1" / "Q1." / "#1"
+  const TYPED_RE = /^\s*(?:(?:question|problem|q)\s*#?\s*(\d{1,3})\b\s*[.):]?|#\s*(\d{1,3})\b\s*[.):]?|\(?(\d{1,3})\s*(?:[.):]|\t))/i;
+  const typedNum = (t) => { const m = t.match(TYPED_RE); return m ? { n: +(m[1] || m[2] || m[3]), len: m[0].length } : null; };
   const isHeading = (k) => {
     if (k.kind !== "p") return false;
     const t = k.text.trim();
     if (!t) return false;
     if (/^(part|section)\s+(\w+)\b/i.test(t)) return true;
-    if (/^(?:the\s+)?end(?:\s+of\s+(?:the\s+)?(?:test|exam|quiz|section|part))?\b|^stop\b/i.test(t)) return true;
+    if (/^(?:the\s+)?end(?:\s+of\s+(?:the\s+)?(?:test|exam|quiz|section|part))?\b|^stop\b|^(?:check|review) (?:your|all) (?:work|answers)|^good luck|^have a (?:great|good)/i.test(t)) return true;
     const letters = t.replace(/[^A-Za-z]/g, "");
     if (letters.length >= 6 && letters === letters.toUpperCase() && !/^\(?[a-fA-F][.)]/.test(t)) return true;
     return false;
@@ -274,25 +299,59 @@
     const auto = [];
     if (main) {
       const abs = doc.nums[main];
-      K.forEach((k, i) => { if (k.numId && k.ilvl === 0 && (k.numId === main || (abs && doc.nums[k.numId] === abs))) auto.push({ num: auto.length + 1, start: i }); });
+      const seen = new Set();
+      let counter = null;
+      K.forEach((k, i) => {
+        if (!(k.numId && k.ilvl === 0 && (k.numId === main || (abs && doc.nums[k.numId] === abs)))) return;
+        if (!seen.has(k.numId)) { seen.add(k.numId); if (doc.restart[k.numId] != null) counter = doc.restart[k.numId] - 1; }
+        if (counter == null) counter = (doc.absStart[abs] || 1) - 1;
+        counter++;
+        auto.push({ num: counter, start: i });
+      });
+      // Numbers must identify questions; if a list restarts, count instead.
+      if (auto.some((it, j) => j && it.num <= auto[j - 1].num)) auto.forEach((it, j) => (it.num = j + 1));
     }
-    // Mode 2: typed numbers counting up from 1.
-    const typed = [];
+    // Mode 2: typed numbers counting up. The longest such run in the file is
+    // taken (it may start anywhere, e.g. at 16 for a second part). A repeated
+    // number continues the question ("12. (continued)"). A small jump is
+    // allowed; if the question before ends with as many pictures on their
+    // own lines as numbers were skipped, those pictures are the missing
+    // questions (their numbers are inside the pictures).
+    const cands = [];
     K.forEach((k, i) => {
       if (k.kind !== "p" || k.numId) return;
-      const m = k.text.match(TYPED_RE);
-      if (!m) return;
-      const n = +m[1], expect = typed.length + 1;
-      if (n === expect) typed.push({ num: n, start: i, numText: m[1] });
-      else if (n === expect + 1 && typed.length) {
-        // A skipped number: the last picture on its own line in the previous
-        // question is taken to be the missing one (number inside the picture).
-        const prev = typed[typed.length - 1];
-        let pic = -1;
-        for (let j = i - 1; j > prev.start; j--) if (K[j].kind === "p" && K[j].pic && !K[j].text.trim()) { pic = j; break; }
-        if (pic > 0) { typed.push({ num: expect, start: pic, picNum: true }); typed.push({ num: n, start: i, numText: m[1] }); }
-      }
+      const t = typedNum(k.text);
+      if (t) cands.push({ i, n: t.n });
     });
+    const picOnly = K.map((k) => k.kind === "p" && k.pic && !k.text.trim());
+    const picsBetween = (a, b) => { let n = 0; for (let j = a + 1; j < b; j++) if (picOnly[j]) n++; return n; };
+    const chain = (from) => {
+      const out = [cands[from]];
+      for (let c = from + 1; c < cands.length; c++) {
+        const last = out[out.length - 1];
+        const jump = cands[c].n - last.n;
+        if (jump > 0 && (jump <= 3 || picsBetween(last.i, cands[c].i) >= jump - 1)) out.push(cands[c]);
+      }
+      return out;
+    };
+    let best = [];
+    for (let c = 0; c < cands.length; c++) {
+      if (best.length && cands.length - c <= best.length) break;
+      const ch = chain(c);
+      if (ch.length > best.length) best = ch;
+    }
+    const typed = [];
+    for (const c of best.length >= 2 || (best.length === 1 && best[0].n === 1) ? best : []) {
+      const prev = typed[typed.length - 1];
+      const gap = prev ? c.n - prev.num - 1 : 0;
+      if (gap > 0) {
+        // The last pictures on their own lines before this question fill the gap.
+        const pics = [];
+        for (let j = prev.start + 1; j < c.i; j++) if (picOnly[j]) pics.push(j);
+        if (pics.length >= gap) pics.slice(-gap).forEach((j, g) => typed.push({ num: prev.num + 1 + g, start: j, picNum: true }));
+      }
+      typed.push({ num: c.n, start: c.i });
+    }
     const mode = auto.length >= typed.length ? (auto.length ? "auto" : null) : "typed";
     const items = mode === "auto" ? auto : mode === "typed" ? typed : [];
     const last = K.length && K[K.length - 1].kind === "sectPr" ? K.length - 1 : K.length;
@@ -312,11 +371,12 @@
       let be = ce;
       while (be > it.start + 1 && K[be - 1].kind === "p" && !K[be - 1].hasContent && !K[be - 1].sect) be--;
       it.bodyEnd = be;
-      it.leadBreak = !!(K[it.start].leadBreak || K[it.start].pbBefore);
+      it.leadN = K[it.start].leadN || 0;
       const lastK = K[be - 1];
-      it.trailBreak = !!(lastK && lastK.kind === "p" && lastK.trailBreak);
+      it.trailN = lastK && lastK.kind === "p" ? lastK.trailN || 0 : 0;
       const text = K.slice(it.start, be).map((k) => previewOf(k.xml)).join(" ").replace(/\s+/g, " ").trim();
-      const body = mode === "typed" && !it.picNum ? text.replace(TYPED_RE, "").trim() : text;
+      const tn = mode === "typed" && !it.picNum ? typedNum(text) : null;
+      const body = tn ? text.slice(tn.len).trim() : text;
       it.preview = it.picNum ? "(picture)" : body.length > 90 ? body.slice(0, 88) + "…" : body || "(equation or picture)";
       it.choices = countChoices(doc, K.slice(it.start, be));
       it.between = K.slice(ce, it.end);
@@ -330,8 +390,11 @@
       it.ctx = ctx;
       readCtx(it.between);
     });
+    // A picture question is multiple choice if the nearest questions around it are.
+    const near = (i, d) => { for (let j = i + d; j >= 0 && j < items.length; j += d) if (!items[j].picNum) return items[j]; return null; };
     items.forEach((it, i) => {
-      it.mc = it.ctx !== "essay" && !!(it.choices >= 4 || (it.picNum && (!items[i - 1] || items[i - 1].choices >= 4) && (!items[i + 1] || items[i + 1].choices >= 4)));
+      const a = near(i, -1), b = near(i, 1);
+      it.mc = it.ctx !== "essay" && !!(it.choices >= 4 || (it.picNum && (!a || a.choices >= 4) && (!b || b.choices >= 4)));
     });
     return { mode, items };
   }
@@ -372,7 +435,7 @@
       if (!chosen.has(it.num)) return;
       if (questions.length) {
         const prev = items[prevIdx];
-        const textBetween = prev.between.some((k) => k.kind !== "p" || k.sect || (k.text.trim() && !k.breakOnly));
+        const textBetween = prev.between.some((k) => k.sect || (k.kind === "tbl") || (k.kind === "other" && k.hasContent) || (k.kind === "p" && k.text.trim() && !k.breakOnly));
         if (idx !== prevIdx + 1 || textBetween) block++;
       }
       questions.push({ ...it, block, correctIdx: [], key: null, keyAll: false });
@@ -384,9 +447,11 @@
   /* ---------------- write a version ---------------- */
 
   /* Replace characters [a, b) of a paragraph's w:t text with s. */
-  function editText(xml, a, b, s) {
+  function editText(xml0, a, b, s) {
+    const { masked: xml, restore } = mask(xml0);
     let pos = 0, done = false;
-    return xml.replace(/(<w:t(?:\s[^>]*)?>)([^<]*)(<\/w:t>)/g, (m, open, raw, close) => {
+    return restore(xml.replace(/(<w:t(?:\s[^>]*)?>)([^<]*)(<\/w:t>)|<w:tab\/>/g, (m, open, raw, close) => {
+      if (!open) { pos++; return m; } // a tab counts as one character
       const txt = decodeXml(raw);
       const from = pos, to = pos + txt.length;
       pos = to;
@@ -397,15 +462,42 @@
       const t = keepL + mid + keepR;
       const o = /xml:space=/.test(open) || !/^\s|\s$/.test(t) ? open : open.replace(/<w:t/, '<w:t xml:space="preserve"');
       return o + encodeXml(t) + close;
-    });
+    }));
   }
-  const wText = (xml) => [...xml.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g)].map((m) => decodeXml(m[1])).join("");
+  // A paragraph's text as editText counts it: w:t text and tabs.
+  const wText = (xml) => [...mask(xml).masked.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>|<w:tab\/>/g)].map((m) => (m[0] === "<w:tab/>" ? "\t" : decodeXml(m[1]))).join("");
 
   function renumber(pxml, num) {
     const t = wText(pxml);
-    const m = t.match(/^(\s*)(\d{1,3})/);
+    const m = t.match(TYPED_RE);
     if (!m) return pxml;
-    return editText(pxml, m[1].length, m[1].length + m[2].length, String(num));
+    const digits = m[1] || m[2] || m[3];
+    const at = m.index + m[0].indexOf(digits);
+    return editText(pxml, at, at + digits.length, String(num));
+  }
+
+  /* After moving questions, a bookmark or comment range could start in one
+   * question and end in another, or end before it starts. Those markers are
+   * removed (the bookmark or comment itself stays). */
+  const RANGES = [["w:bookmarkStart", "w:bookmarkEnd"], ["w:commentRangeStart", "w:commentRangeEnd"], ["w:permStart", "w:permEnd"],
+    ["w:moveFromRangeStart", "w:moveFromRangeEnd"], ["w:moveToRangeStart", "w:moveToRangeEnd"]];
+  function fixRanges(xml, before) {
+    for (const [a, b] of RANGES) {
+      const pos = (tag, src) => {
+        const map = {};
+        for (const m of src.matchAll(new RegExp(`<${tag}\\b[^>]*\\bw:id="([^"]+)"[^>]*\\/>`, "g"))) (map[m[1]] = map[m[1]] || []).push(m.index);
+        return map;
+      };
+      const s0 = pos(a, before), e0 = pos(b, before), s1 = pos(a, xml), e1 = pos(b, xml);
+      const bad = new Set();
+      for (const id of new Set([...Object.keys(s1), ...Object.keys(e1)])) {
+        const wasOk = s0[id] && e0[id] && s0[id].length === 1 && e0[id].length === 1 && s0[id][0] < e0[id][0];
+        const isOk = s1[id] && e1[id] && s1[id].length === 1 && e1[id].length === 1 && s1[id][0] < e1[id][0];
+        if (wasOk && !isOk) bad.add(id);
+      }
+      if (bad.size) xml = xml.replace(new RegExp(`<(?:${a}|${b})\\b[^>]*\\bw:id="([^"]+)"[^>]*\\/>`, "g"), (m, id) => (bad.has(id) ? "" : m));
+    }
+    return xml;
   }
 
   const BREAK_RUN = '<w:r><w:br w:type="page"/></w:r>';
@@ -437,13 +529,18 @@
     // The content of each question, without the page breaks at its edges.
     const content = qs.map((q) => {
       const parts = K.slice(q.start, q.bodyEnd).map((k) => k.xml);
-      if (q.leadBreak) parts[0] = removeFirst(removeFirst(parts[0], PBB), PB_ONE);
-      if (q.trailBreak) parts[parts.length - 1] = removeLast(parts[parts.length - 1], PB_ONE);
+      if (q.leadN) {
+        const pbb = PBB.test(parts[0]);
+        parts[0] = removeFirst(parts[0], PBB);
+        for (let i = pbb ? 1 : 0; i < q.leadN; i++) parts[0] = removeFirst(parts[0], PB_ONE);
+      }
+      for (let i = 0; i < q.trailN; i++) parts[parts.length - 1] = removeLast(parts[parts.length - 1], PB_ONE);
       return parts;
     });
-    let out = "", prev = 0;
+    let out = "", prev = 0, moved = false;
     qs.forEach((slot, k) => {
       const q = qs[perm[k]];
+      if (q !== slot) moved = true;
       if (q === slot) { // unchanged position: copy as is
         out += xml.slice(prev, K[slot.bodyEnd - 1].e);
         prev = K[slot.bodyEnd - 1].e;
@@ -451,8 +548,8 @@
       }
       const parts = content[perm[k]].slice();
       if (parsed.mode === "typed" && !q.picNum && q.num !== slot.num) parts[0] = renumber(parts[0], slot.num);
-      if (slot.leadBreak && K[q.start].kind === "p") parts[0] = addLeadBreak(parts[0]);
-      if (slot.trailBreak) {
+      for (let i = 0; i < slot.leadN; i++) parts[0] = addLeadBreak(parts[0]);
+      for (let i = 0; i < slot.trailN; i++) {
         const lastK = K[q.bodyEnd - 1];
         if (lastK.kind === "p") parts[parts.length - 1] = addTrailBreak(parts[parts.length - 1]);
         else parts.push(`<w:p>${BREAK_RUN}</w:p>`);
@@ -460,12 +557,21 @@
       out += xml.slice(prev, K[slot.start].s) + parts.join("");
       prev = K[slot.bodyEnd - 1].e;
     });
-    return out + xml.slice(prev);
+    out += xml.slice(prev);
+    return moved ? fixRanges(out, xml) : out;
   }
 
   /* "Version A" → "Version B" in the text (document, headers, footers). */
-  function relabel(xml, v) {
+  function relabel(xml0, v) {
     let count = 0;
+    // Text boxes first (each holds its own paragraphs), then the rest.
+    const saved = [];
+    const xml = xml0.replace(/<w:txbxContent\b[^>]*>[\s\S]*?<\/w:txbxContent>/g, (m) => {
+      const r = relabel(m.replace(/^<w:txbxContent\b[^>]*>/, "").replace(/<\/w:txbxContent>$/, ""), v);
+      count += r.count;
+      saved.push(m.match(/^<w:txbxContent\b[^>]*>/)[0] + r.xml + "</w:txbxContent>");
+      return `\u0001${saved.length - 1}\u0001`;
+    });
     const out = xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (p) => {
       let t = wText(p), q = p;
       const re = /\bVersion\s*[:\-]?\s*A\b/g;
@@ -475,7 +581,7 @@
       for (const at of hits.reverse()) { q = editText(q, at, at + 1, v); count++; }
       return q;
     });
-    return { xml: out, count };
+    return { xml: out.replace(/\u0001(\d+)\u0001/g, (m, i) => saved[+i]), count };
   }
 
   async function build(doc, parsed, perm, v) {
@@ -490,5 +596,5 @@
     return { blob: await writeZip(doc.entries, replaced), count, picMoved: moved };
   }
 
-  root.MGDocx = { open, findItems, guessSelection, parse, reorder, relabel, build, _internal: { readZip, writeZip, entryBytes, crc32, children, textOf } };
+  root.MGDocx = { open, findItems, guessSelection, parse, reorder, relabel, build, _internal: { readZip, writeZip, entryBytes, crc32, children, textOf, typedNum, fixRanges } };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -142,10 +142,12 @@ MultiGrader.
   MathType, the old Equation Editor, and Word's own equations. The file is
   rearranged, not converted, and everything else in it is kept as it was.
 - **Questions** are found by Word's automatic numbering, or by numbers typed
-  at the start of a line (`1.`, `2)`, `3` then a tab). A repeated number such
-  as "12. (continued)" stays part of question 12. If a number is skipped and
-  the question before it ends with a picture on its own line, that picture is
-  taken to be the missing question (a screenshot with its number inside it).
+  at the start of a line (`1.`, `2)`, `(3)`, `4` then a tab, `Question 5`,
+  `Q6.`), starting from any number (a second part may start at 16). A
+  repeated number such as "12. (continued)" stays part of question 12. If
+  numbers are skipped and the question before ends with that many pictures on
+  their own lines, those pictures are taken to be the missing questions
+  (screenshots with their numbers inside them).
 - **Which questions are on the answer sheet:** a test often has multiple-choice
   and written parts. MultiGrader guesses the multiple-choice questions from the
   answer choices and from headings such as "Essay section" or "Show all work",
@@ -154,8 +156,10 @@ MultiGrader.
   are. If the file's numbers differ from the answer sheet's (file 16 is Q9),
   that's shown too.
 - **What stays in place:** page breaks, section breaks, headings ("Part
-  Two…", lines in capitals, "End of test"), and the blank lines after each
-  question, so each page keeps its spacing. Questions never move across a
+  Two…", lines in capitals, "End of test", "Check your work"), and the blank
+  lines after each question, so each page keeps its spacing. Text boxes,
+  tables of answer choices, lettered choice lists, tracked changes and
+  comments move with their question. Questions never move across a
   heading or a written question.
 - **Numbers:** automatic numbering renumbers itself, and typed numbers are
   rewritten, so every version reads 1, 2, 3… A number that is part of a
@@ -257,6 +261,7 @@ node tests/e2e-versions.js        # versions, either / all-required keys, missin
 node tests/latex-test.js          # finding and reordering questions in .tex files
 node tests/e2e-latex.js           # upload .tex → key from \CorrectChoice → shuffle → download
 node tests/e2e-docx.js            # upload .docx → answer-sheet questions → shuffle → download
+node tests/docx-stress-test.js    # 300 random Word tests × structures; shuffled files complete and correct
 node tests/pdf-test.js            # PDF download: page size, text, every page scans (needs poppler-utils)
 node tests/roster-test.js         # roster text formats (CSV/spreadsheet/OCR lines, Form)
 node tests/e2e-roster.js          # roster import: text, duplicates, screenshot via file and paste
