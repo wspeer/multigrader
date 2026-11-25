@@ -511,9 +511,19 @@
   }
 
   /* Version A question numbers that must not move (1-based). */
-  function fixedSet(t) { return new Set((t.fixedQuestions || []).filter((x) => Number.isInteger(x))); }
+  function fixedSet(t) {
+    const set = new Set((t.fixedQuestions || []).filter((x) => Number.isInteger(x)));
+    for (const x of picPinned(t)) set.add(x);
+    return set;
+  }
+  /* Word: questions whose number is part of a picture can't be renumbered. */
+  function picPinned(t) {
+    const tex = ui(t).tex;
+    if (!tex || tex.kind !== "docx" || !tex.parsed.questions) return [];
+    return tex.parsed.questions.map((q, i) => (q.picNum ? i + 1 : 0)).filter(Boolean);
+  }
 
-  /* Groups from the LaTeX file (questions separated by headings), if known. */
+  /* Groups from the LaTeX or Word file (questions separated by headings), if known. */
   function texBlocks(t) {
     const n = L.questionChoices(t).length;
     return t.texBlocks && t.texBlocks.length === n ? t.texBlocks : null;
@@ -560,7 +570,9 @@
     const p = tex.parsed;
     const out = { ok: !p.error && p.questions.length === qc.length, warnings: [], keyFromTex: [], keyDiffs: [] };
     if (p.error) out.error = p.error;
-    else if (p.questions.length !== qc.length) out.error = `Found ${p.questions.length} question${p.questions.length === 1 ? "" : "s"} in the file, but this test has ${qc.length}. Check the list of what was found below; the question count and order must match the test's format.`;
+    else if (p.questions.length !== qc.length) out.error = tex.kind === "docx"
+      ? `You've chosen ${p.questions.length} question${p.questions.length === 1 ? "" : "s"} for the answer sheet, but this test has ${qc.length}. Change the list of question numbers below.`
+      : `Found ${p.questions.length} question${p.questions.length === 1 ? "" : "s"} in the file, but this test has ${qc.length}. Check the list of what was found below; the question count and order must match the test's format.`;
     if (!out.ok) return out;
     p.questions.forEach((q, i) => {
       if (q.choices && q.choices !== qc[i].length) out.warnings.push(`Q${i + 1} has ${q.choices} answer choices in the file, but the test format gives it ${qc[i].length} (${qc[i].join("")}).`);
@@ -597,6 +609,45 @@
       : `Downloaded Version ${v}. No “Version A” label was found in the file; add one to your header so students know which version to bubble.`);
   }
 
+  async function downloadVersionDocx(t, v) {
+    const tex = ui(t).tex;
+    const perm = St.versionMap(t, v);
+    try {
+      const res = await MGDocx.build(tex.doc, tex.parsed, perm, v);
+      const base = tex.name.replace(/\.docx$/i, "").replace(/[-_ ]?(version[-_ ]?)?A$/i, "");
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(res.blob);
+      a.download = safeFileName(`${base}-version-${v}`) + ".docx";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      const notes = [res.count ? `Changed “Version A” to “Version ${v}” in ${res.count} place${res.count > 1 ? "s" : ""}.` : `No “Version A” label was found in the file; add one so students know which version to bubble.`];
+      if (res.picMoved.length) notes.push(`Q${res.picMoved.join(", Q")} moved, but ${res.picMoved.length > 1 ? "their numbers are" : "its number is"} part of a picture and still say${res.picMoved.length > 1 ? "" : "s"} the old number.`);
+      notes.push("Check the page breaks in Word before printing.");
+      toast(`Downloaded Version ${v}. ` + notes.join(" "));
+    } catch (e) {
+      alert("Couldn't make the Word file: " + e.message);
+    }
+  }
+
+  /* "1, 2, 3, 5, 16, 17" → "1–3, 5, 16–17" */
+  function numRanges(nums) {
+    const out = [];
+    for (const n of nums) {
+      const last = out[out.length - 1];
+      if (last && n === last[1] + 1) last[1] = n; else out.push([n, n]);
+    }
+    return out.map(([a, b]) => (a === b ? `${a}` : `${a}–${b}`)).join(", ");
+  }
+  function parseNumRanges(text) {
+    const out = [];
+    for (const m of text.matchAll(/(\d+)\s*(?:[-–—]|to)\s*(\d+)|(\d+)/g)) {
+      if (m[3]) out.push(+m[3]);
+      else for (let a = +m[1], b = +m[2], i = Math.min(a, b); i <= Math.max(a, b) && out.length < 500; i++) out.push(i);
+    }
+    return [...new Set(out)].sort((a, b) => a - b);
+  }
+
   function groupRanges(p) {
     const out = [];
     p.questions.forEach((q, i) => {
@@ -614,9 +665,25 @@
     let body = "";
     if (tex) {
       const p = tex.parsed;
+      const how = { exam: "exam class \\question", enumerate: "numbered list \\item", auto: "Word's automatic numbering", typed: "typed question numbers" }[p.mode] || "";
+      if (tex.kind === "docx" && p.items && p.items.length) {
+        const sel = p.questions.map((q) => q.num);
+        body += `<p class="small"><strong>${esc(tex.name)}</strong>: found ${p.items.length} numbered question${p.items.length === 1 ? "" : "s"} (${how}).</p>
+          <div class="form-row docx-sel"><label class="grow">Questions on the answer sheet <span class="muted small">(numbers as in your Word file; the others stay where they are)</span>
+            <input id="docx-sel" value="${esc(numRanges(sel))}" placeholder="e.g. 1-8, 16-22" spellcheck="false" autocomplete="off" /></label></div>`;
+        if (chk.ok && sel.some((n, i) => n !== i + 1)) {
+          // Runs where answer-sheet and file numbers go up together.
+          const runs = [];
+          sel.forEach((n, i) => { const r = runs[runs.length - 1]; if (r && n === r.f2 + 1) { r.f2 = n; r.q2 = i + 1; } else runs.push({ f1: n, f2: n, q1: i + 1, q2: i + 1 }); });
+          const rng = (a, b) => (a === b ? `${a}` : `${a}–${b}`);
+          body += `<p class="muted small">Numbering on the answer sheet: ${runs.map((r) => `Q${rng(r.q1, r.q2)} = file ${rng(r.f1, r.f2)}`).join(", ")}.</p>`;
+        }
+      }
       body += chk.ok
-        ? `<p class="good-txt small"><strong>${esc(tex.name)}</strong>: found all ${p.questions.length} questions (${p.mode === "exam" ? "exam class \\question" : "numbered list \\item"}) ✓</p>`
-        : `<div class="notice bad small"><strong>${esc(tex.name)}</strong>: ${esc(chk.error)}</div>`;
+        ? `<p class="good-txt small">${tex.kind === "docx" ? "" : `<strong>${esc(tex.name)}</strong>: `}found all ${p.questions.length} questions${tex.kind === "docx" ? " for the answer sheet" : ` (${how})`} ✓</p>`
+        : `<div class="notice bad small">${tex.kind === "docx" ? "" : `<strong>${esc(tex.name)}</strong>: `}${esc(chk.error)}</div>`;
+      const pins = picPinned(t);
+      if (chk.ok && pins.length) body += `<p class="muted small">Q${pins.join(", Q")} ${pins.length > 1 ? "are pictures with their numbers" : "is a picture with its number"} inside, so ${pins.length > 1 ? "they stay" : "it stays"} in place when shuffling.</p>`;
       if (chk.ok) {
         const nb = new Set(p.questions.map((q) => q.block)).size;
         if (nb > 1) body += `<p class="muted small">Your file has ${nb} groups of questions separated by headings or instructions (${groupRanges(p).join(", ")}). Shuffle keeps each question inside its group.</p>`;
@@ -637,18 +704,17 @@
           : `<p class="good-txt small">The answers marked in the file match your key on all ${n} question${n > 1 ? "s" : ""} ✓</p>`;
       }
       if (p.questions.length) {
-        body += `<details class="help"><summary>Questions found in the file (${p.questions.length})</summary><ol class="tex-list">${p.questions.map((q) => `<li>${q.block !== (p.questions[p.questions.indexOf(q) - 1] || q).block ? `<span class="tex-break"></span>` : ""}${esc(q.preview || "(empty)")}${q.key || q.correctIdx.length ? ` <span class="muted">· answer ${esc(q.key ? q.key.join(q.keyAll ? "+" : "") : q.correctIdx.map((x) => "ABCDEF"[x]).join("+"))}</span>` : ""}${q.choices ? ` <span class="muted">· ${q.choices} choices</span>` : ""}</li>`).join("")}</ol></details>`;
+        body += `<details class="help"><summary>Questions found in the file (${p.questions.length})</summary><ol class="tex-list">${p.questions.map((q) => `<li>${q.block !== (p.questions[p.questions.indexOf(q) - 1] || q).block ? `<span class="tex-break"></span>` : ""}${tex.kind === "docx" && q.num !== p.questions.indexOf(q) + 1 ? `<span class="muted">(file ${q.num})</span> ` : ""}${esc(q.preview || "(empty)")}${q.key || q.correctIdx.length ? ` <span class="muted">· answer ${esc(q.key ? q.key.join(q.keyAll ? "+" : "") : q.correctIdx.map((x) => "ABCDEF"[x]).join("+"))}</span>` : ""}${q.choices ? ` <span class="muted">· ${q.choices} choices</span>` : ""}</li>`).join("")}</ol></details>`;
       }
     }
     return `
       <div class="tex-box">
-        <div class="ver-head"><strong>From your LaTeX file</strong></div>
-        <p class="muted small">Upload the <code>.tex</code> file for Version A. MultiGrader finds the questions (<code>\\question</code> in the exam class, or <code>\\item</code> in a numbered <code>enumerate</code> list),
-          and for each version gives you a new <code>.tex</code> file with the questions in that version's order. That version's key is set automatically.
-          Page breaks and headings between questions stay where they are; answer choices, figures and solutions move with their question.</p>
+        <div class="ver-head"><strong>From your LaTeX or Word file</strong></div>
+        <p class="muted small">Upload Version A as a LaTeX (<code>.tex</code>) or Word (<code>.docx</code>) file. For each version you get a new file with the questions in that version's order, and that version's key is set automatically.
+          Answer choices, pictures and equations move with their question; page breaks and headings between questions stay where they are.</p>
         <div class="btn-row">
-          <label class="btn" for="tex-in">${tex ? "Upload a different .tex…" : "Upload Version A .tex…"}</label>
-          <input type="file" id="tex-in" accept=".tex,text/x-tex,application/x-tex,text/plain" class="visually-hidden" />
+          <label class="btn" for="tex-in">${tex ? "Upload a different file…" : "Upload Version A (.tex or .docx)…"}</label>
+          <input type="file" id="tex-in" accept=".tex,.docx,text/x-tex,application/x-tex,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" class="visually-hidden" />
         </div>
         ${body}
         <div class="form-row tex-fixed">
@@ -689,7 +755,7 @@
                  ${canUndo ? `<button class="btn small ghost" data-undo title="Go back to the order before the last change">↶ Undo</button>` : ""}
                  <button class="btn small ghost" data-same>Same as A</button>
                  <button class="btn small" data-lock title="Keep this order: Shuffle and editing are turned off until you unlock">Lock order</button>`}
-            ${ui(t).tex ? `<span class="spacer"></span><button class="btn small primary" data-texdl ${texCheck(t).ok ? "" : "disabled"}>⬇ Version ${v} .tex</button>` : ""}</div>
+            ${ui(t).tex ? `<span class="spacer"></span><button class="btn small primary" data-texdl ${texCheck(t).ok ? "" : "disabled"}>⬇ Version ${v} ${ui(t).tex.kind === "docx" ? ".docx" : ".tex"}</button>` : ""}</div>
           ${t.sections.map((s, si) => {
             const r = ranges[si];
             if (!r.n) return "";
@@ -707,10 +773,35 @@
     if (texIn) texIn.onchange = async () => {
       const f = texIn.files[0];
       if (!f) return;
-      const text = await f.text();
-      ui(t).tex = { name: f.name, text, parsed: MGLatex.parse(text) };
+      if (/\.doc$/i.test(f.name)) {
+        alert("Older Word files (.doc) can't be read. In Word, choose File → Save As → Word Document (.docx), then upload that file. Equations and pictures are kept.");
+        return;
+      }
+      const head = new Uint8Array(await f.slice(0, 2).arrayBuffer());
+      if (/\.docx$/i.test(f.name) || (head[0] === 0x50 && head[1] === 0x4b)) {
+        try {
+          const doc = await MGDocx.open(await f.arrayBuffer());
+          const found = MGDocx.findItems(doc);
+          const sel = MGDocx.guessSelection(found.items, L.questionChoices(t).length);
+          ui(t).tex = { kind: "docx", name: f.name, doc, found, parsed: MGDocx.parse(doc, found, sel) };
+        } catch (e) {
+          alert("Couldn't read that Word file: " + e.message);
+          return;
+        }
+      } else {
+        const text = await f.text();
+        ui(t).tex = { kind: "tex", name: f.name, text, parsed: MGLatex.parse(text) };
+      }
       const chk = texCheck(t);
       if (chk && chk.ok) { t.texBlocks = ui(t).tex.parsed.questions.map((q) => q.block); saveSoon(t); }
+      renderVersions(t);
+    };
+    const ds = $("#docx-sel");
+    if (ds) ds.onchange = () => {
+      const tex = ui(t).tex;
+      tex.parsed = MGDocx.parse(tex.doc, tex.found, parseNumRanges(ds.value).filter((n) => tex.found.items.some((it) => it.num === n)));
+      const chk = texCheck(t);
+      if (chk && chk.ok) { t.texBlocks = tex.parsed.questions.map((q) => q.block); saveSoon(t); }
       renderVersions(t);
     };
     const fx = $("#tex-fixed");
@@ -758,7 +849,7 @@
             const blocks = texBlocks(t);
             const crossing = blocks ? nums.filter((x, k) => blocks[x - 1] !== blocks[r.start + k]) : [];
             msg.innerHTML = crossing.length
-              ? `<span class="warn-txt">✓ saved, but Q${crossing.join(", Q")} would move across a heading in your LaTeX file</span>`
+              ? `<span class="warn-txt">✓ saved, but Q${crossing.join(", Q")} would move across a heading in your file</span>`
               : `<span class="good-txt">✓</span>`;
             inp.classList.remove("invalid");
             $(".vk-list", blk).innerHTML = versionKeyText(t, v);
@@ -774,7 +865,7 @@
         };
       });
       const dl = $("[data-texdl]", blk);
-      if (dl) dl.onclick = () => downloadVersionTex(t, v);
+      if (dl) dl.onclick = () => (ui(t).tex.kind === "docx" ? downloadVersionDocx(t, v) : downloadVersionTex(t, v));
       const on = (sel, fn) => { const b = $(sel, blk); if (b) b.onclick = fn; };
       on("[data-shuffle]", () => {
         rememberOrder(t, v, true);

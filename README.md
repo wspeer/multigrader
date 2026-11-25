@@ -98,7 +98,7 @@ you can check it against your printed test.
 
 #### Making the versions from your LaTeX file
 
-In the Versions card, **Upload Version A .tex…**. MultiGrader finds the
+In the Versions card, **Upload Version A (.tex or .docx)…**. MultiGrader finds the
 questions: `\question` (also `\titledquestion` and `\bonusquestion`) inside
 `questions` in the exam class, or `\item` in top-level numbered `enumerate`
 lists, which may be spread over several lists. Click **Shuffle**, then
@@ -130,6 +130,43 @@ already set, and it's written as a comment at the top of the file.
 - The uploaded file is kept only until you leave the page. Comments, `verbatim`
   and `\verb` are ignored when looking for questions. Questions pulled in with
   `\input{…}` aren't seen, so upload a single combined file.
+
+#### Making the versions from your Word file
+
+The same upload takes a Word **.docx** file. MultiGrader finds the questions,
+and for each version **⬇ Version B .docx** gives you a copy of your file with
+the questions in that version's order. That version's key is set in
+MultiGrader.
+
+- **Pictures and equations** move with their question untouched: screenshots,
+  MathType, the old Equation Editor, and Word's own equations. The file is
+  rearranged, not converted, and everything else in it is kept as it was.
+- **Questions** are found by Word's automatic numbering, or by numbers typed
+  at the start of a line (`1.`, `2)`, `3` then a tab). A repeated number such
+  as "12. (continued)" stays part of question 12. If a number is skipped and
+  the question before it ends with a picture on its own line, that picture is
+  taken to be the missing question (a screenshot with its number inside it).
+- **Which questions are on the answer sheet:** a test often has multiple-choice
+  and written parts. MultiGrader guesses the multiple-choice questions from the
+  answer choices and from headings such as "Essay section" or "Show all work",
+  and shows them as file numbers (for example `1–8, 16–22`). Change the list if
+  needed; the count must match the test. The other questions stay where they
+  are. If the file's numbers differ from the answer sheet's (file 16 is Q9),
+  that's shown too.
+- **What stays in place:** page breaks, section breaks, headings ("Part
+  Two…", lines in capitals, "End of test"), and the blank lines after each
+  question, so each page keeps its spacing. Questions never move across a
+  heading or a written question.
+- **Numbers:** automatic numbering renumbers itself, and typed numbers are
+  rewritten, so every version reads 1, 2, 3… A number that is part of a
+  picture can't be changed, so that question is kept in place when shuffling.
+- "Version A" in the text or the header becomes the new version letter.
+- **Check the page breaks** in Word before printing: a longer question can push
+  a page over, which can leave a nearly empty page.
+- Older `.doc` files must be saved as `.docx` first (**File → Save As → Word
+  Document**); equations and pictures are kept. The file is read in the browser
+  and kept only until you leave the page.
+
 - Results can be filtered by version.
 
 ### Question types
@@ -201,6 +238,7 @@ js/layout.js      sheet geometry, ID code, shapes for SVG and PDF
 js/scanner.js     image → answers
 js/store.js       localStorage / IndexedDB data, grading, backup merge
 js/latex.js       find and reorder questions in a LaTeX file
+js/docx.js        find and reorder questions in a Word .docx file (zip + XML, no libraries)
 js/pdf.js         answer sheets as a PDF (vector, built-in Helvetica, no libraries)
 js/roster.js      pasted / recognized roster text → names (+ optional Form)
 js/ocr.js         read a roster screenshot (bundled Tesseract, loaded on demand)
@@ -218,6 +256,7 @@ node tests/e2e.js                 # class → test → print → fill + photogra
 node tests/e2e-versions.js        # versions, either / all-required keys, missing version bubble
 node tests/latex-test.js          # finding and reordering questions in .tex files
 node tests/e2e-latex.js           # upload .tex → key from \CorrectChoice → shuffle → download
+node tests/e2e-docx.js            # upload .docx → answer-sheet questions → shuffle → download
 node tests/pdf-test.js            # PDF download: page size, text, every page scans (needs poppler-utils)
 node tests/roster-test.js         # roster text formats (CSV/spreadsheet/OCR lines, Form)
 node tests/e2e-roster.js          # roster import: text, duplicates, screenshot via file and paste

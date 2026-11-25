@@ -1,0 +1,494 @@
+/* MultiGrader — find the questions in a Word (.docx) test and reorder them.
+ *
+ * A .docx file is a zip of XML. The questions live in word/document.xml as a
+ * sequence of paragraphs (and tables). Pictures, MathType and old Equation
+ * Editor objects, and Word's own equations are elements inside those
+ * paragraphs that point to files elsewhere in the zip, so moving whole
+ * paragraphs moves them intact. Nothing is redrawn or converted; every other
+ * part of the file is copied byte for byte.
+ *
+ * Questions are found either by Word's automatic numbering (the main numbered
+ * list) or by typed numbers ("1.", "2)", "3<tab>") at the start of a
+ * paragraph, counting up from 1. A typed number repeated ("12. (continued)")
+ * continues the previous question. If a number is skipped and the previous
+ * question contains a picture on its own line, that picture is taken to be the
+ * missing question (a screenshot with its number inside it).
+ *
+ * A question runs from its number to the next question, except that page
+ * breaks, section breaks and headings ("Part Two…", ALL-CAPS lines) and
+ * everything after them stay in place between the questions. A page break at
+ * the very start or end of a question also stays with its position.
+ * Blank lines after a question also stay with the position.
+ * Reordering swaps question contents between positions; typed numbers are
+ * rewritten so each position keeps its number (automatic numbering renumbers
+ * itself). A number that is part of a picture can't be rewritten, so those
+ * questions should stay in place.
+ */
+(function (root) {
+  "use strict";
+
+  /* ---------------- zip ---------------- */
+
+  const CRC_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+  function crc32(bytes) {
+    let c = 0xffffffff;
+    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  }
+
+  async function pipe(bytes, stream) {
+    const out = new Response(new Blob([bytes]).stream().pipeThrough(stream));
+    return new Uint8Array(await out.arrayBuffer());
+  }
+  const inflateRaw = (b) => pipe(b, new DecompressionStream("deflate-raw"));
+  const deflateRaw = (b) => pipe(b, new CompressionStream("deflate-raw"));
+
+  function readZip(buf) {
+    const u8 = new Uint8Array(buf);
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    let eocd = -1;
+    for (let i = u8.length - 22; i >= Math.max(0, u8.length - 22 - 65535); i--) {
+      if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    }
+    if (eocd < 0) throw new Error("This isn't a Word .docx file (it isn't a zip archive).");
+    const count = dv.getUint16(eocd + 10, true);
+    let p = dv.getUint32(eocd + 16, true);
+    if (p === 0xffffffff) throw new Error("This file is too large to open.");
+    const dec = new TextDecoder();
+    const entries = [];
+    for (let i = 0; i < count; i++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) throw new Error("The .docx file looks damaged.");
+      const flags = dv.getUint16(p + 8, true), method = dv.getUint16(p + 10, true);
+      const time = dv.getUint16(p + 12, true), date = dv.getUint16(p + 14, true);
+      const crc = dv.getUint32(p + 16, true), csize = dv.getUint32(p + 20, true), size = dv.getUint32(p + 24, true);
+      const nlen = dv.getUint16(p + 28, true), xlen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true);
+      const off = dv.getUint32(p + 42, true);
+      const nameBytes = u8.subarray(p + 46, p + 46 + nlen);
+      const name = dec.decode(nameBytes);
+      const lnlen = dv.getUint16(off + 26, true), lxlen = dv.getUint16(off + 28, true);
+      const start = off + 30 + lnlen + lxlen;
+      entries.push({ name, nameBytes, flags: flags & 0x0800, method, time, date, crc, csize, size, data: u8.subarray(start, start + csize) });
+      p += 46 + nlen + xlen + clen;
+    }
+    return entries;
+  }
+
+  async function entryBytes(e) {
+    if (e.method === 0) return e.data;
+    if (e.method === 8) return inflateRaw(e.data);
+    throw new Error("Unsupported compression in the .docx file.");
+  }
+
+  /* Write the zip back: unchanged entries are copied as they were. */
+  async function writeZip(entries, replaced) {
+    const enc = new TextEncoder();
+    const parts = [], central = [];
+    let offset = 0;
+    for (const e of entries) {
+      let { method, crc, csize, size, data } = e;
+      if (replaced.has(e.name)) {
+        const raw = enc.encode(replaced.get(e.name));
+        data = await deflateRaw(raw);
+        method = 8; crc = crc32(raw); csize = data.length; size = raw.length;
+      }
+      const lh = new Uint8Array(30 + e.nameBytes.length);
+      const ldv = new DataView(lh.buffer);
+      ldv.setUint32(0, 0x04034b50, true); ldv.setUint16(4, 20, true); ldv.setUint16(6, e.flags, true);
+      ldv.setUint16(8, method, true); ldv.setUint16(10, e.time, true); ldv.setUint16(12, e.date, true);
+      ldv.setUint32(14, crc, true); ldv.setUint32(18, csize, true); ldv.setUint32(22, size, true);
+      ldv.setUint16(26, e.nameBytes.length, true); ldv.setUint16(28, 0, true);
+      lh.set(e.nameBytes, 30);
+      const ch = new Uint8Array(46 + e.nameBytes.length);
+      const cdv = new DataView(ch.buffer);
+      cdv.setUint32(0, 0x02014b50, true); cdv.setUint16(4, 20, true); cdv.setUint16(6, 20, true);
+      cdv.setUint16(8, e.flags, true); cdv.setUint16(10, method, true); cdv.setUint16(12, e.time, true); cdv.setUint16(14, e.date, true);
+      cdv.setUint32(16, crc, true); cdv.setUint32(20, csize, true); cdv.setUint32(24, size, true);
+      cdv.setUint16(28, e.nameBytes.length, true); cdv.setUint32(42, offset, true);
+      ch.set(e.nameBytes, 46);
+      parts.push(lh, data);
+      central.push(ch);
+      offset += lh.length + data.length;
+    }
+    const csize = central.reduce((a, c) => a + c.length, 0);
+    const end = new Uint8Array(22);
+    const edv = new DataView(end.buffer);
+    edv.setUint32(0, 0x06054b50, true);
+    edv.setUint16(8, entries.length, true); edv.setUint16(10, entries.length, true);
+    edv.setUint32(12, csize, true); edv.setUint32(16, offset, true);
+    return new Blob([...parts, ...central, end], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+  }
+
+  /* ---------------- XML helpers ---------------- */
+
+  const decodeXml = (s) => s.replace(/&(lt|gt|amp|quot|apos|#\d+|#x[0-9a-f]+);/gi, (m, e) =>
+    e === "lt" ? "<" : e === "gt" ? ">" : e === "amp" ? "&" : e === "quot" ? '"' : e === "apos" ? "'" :
+    String.fromCodePoint(e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10)));
+  const encodeXml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  /* The top-level elements between from and to: [{s, e, tag}]. */
+  function children(xml, from, to) {
+    const out = [];
+    const re = /<[^>]*>/g;
+    re.lastIndex = from;
+    let depth = 0, cur = null, m;
+    while ((m = re.exec(xml)) && m.index < to) {
+      const tag = m[0];
+      if (tag[1] === "?" || tag[1] === "!") continue;
+      if (tag[1] === "/") {
+        depth--;
+        if (depth === 0 && cur) { cur.e = re.lastIndex; out.push(cur); cur = null; }
+      } else if (tag.endsWith("/>")) {
+        if (depth === 0) out.push({ s: m.index, e: re.lastIndex, tag: tag.match(/^<([\w:.-]+)/)[1] });
+      } else {
+        if (depth === 0) cur = { s: m.index, tag: tag.match(/^<([\w:.-]+)/)[1] };
+        depth++;
+      }
+    }
+    return out;
+  }
+
+  // Text runs in order: w:t (document text), m:t (Word equations), tabs.
+  const TEXT_RE = /<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>|<w:t(?:\s[^>]*)?\/>|<m:t(?:\s[^>]*)?>([^<]*)<\/m:t>|<w:tab\/>/g;
+  function textOf(xml) {
+    let s = "";
+    for (const m of xml.matchAll(TEXT_RE)) s += m[0] === "<w:tab/>" ? "\t" : decodeXml(m[1] || m[2] || "");
+    return s;
+  }
+  // For previews: also show where equation objects and pictures are.
+  const PREVIEW_RE = new RegExp(TEXT_RE.source + "|<w:object\\b|<w:drawing\\b|<w:pict\\b", "g");
+  function previewOf(xml) {
+    let s = "";
+    for (const m of xml.matchAll(PREVIEW_RE)) {
+      if (m[0] === "<w:tab/>") s += " ";
+      else if (m[0] === "<w:object") s += " ▢ ";
+      else if (m[0] === "<w:drawing" || m[0] === "<w:pict") s += " [picture] ";
+      else s += decodeXml(m[1] || m[2] || "");
+    }
+    return s;
+  }
+
+  const PAGE_BR = /<w:br\s+w:type="page"\s*\/>/g;
+  const PIC_RE = /<w:drawing\b|<w:pict\b/;
+  const CONTENT_RE = /<w:t(?:\s[^>]*)?>[^<]*\S[^<]*<\/w:t>|<m:t(?:\s[^>]*)?>[^<]*<\/m:t>|<w:drawing\b|<w:pict\b|<w:object\b/g;
+
+  function paraInfo(xml, styleNum) {
+    const pPr = (xml.match(/^<w:p\b[^>]*>\s*(<w:pPr>[\s\S]*?<\/w:pPr>)/) || [])[1] || "";
+    const info = { xml, pPr, text: textOf(xml) };
+    const np = pPr.match(/<w:numPr>([\s\S]*?)<\/w:numPr>/);
+    const style = (pPr.match(/<w:pStyle w:val="([^"]+)"/) || [])[1];
+    if (np) {
+      info.numId = (np[1].match(/<w:numId w:val="(\d+)"/) || [])[1];
+      info.ilvl = +((np[1].match(/<w:ilvl w:val="(\d+)"/) || [])[1] || 0);
+    } else if (style && styleNum[style]) {
+      info.numId = styleNum[style].numId; info.ilvl = styleNum[style].ilvl;
+    }
+    if (info.numId === "0") info.numId = undefined;
+    info.sect = /<w:sectPr\b/.test(pPr);
+    info.center = /<w:jc w:val="center"\/>/.test(pPr);
+    info.pic = PIC_RE.test(xml);
+    // Where page breaks sit relative to the paragraph's content.
+    const brs = [...xml.matchAll(PAGE_BR)].map((m) => m.index);
+    const content = [...xml.matchAll(CONTENT_RE)].map((m) => m.index);
+    info.hasContent = content.length > 0;
+    info.breakOnly = brs.length > 0 && !content.length;
+    info.leadBreak = brs.length > 0 && content.length > 0 && brs[0] < content[0] && /<w:pageBreakBefore\s*\/>/.test(pPr) === false;
+    info.trailBreak = brs.length > 0 && content.length > 0 && brs[brs.length - 1] > content[content.length - 1];
+    if (/<w:pageBreakBefore(?:\s+w:val="(?:1|true|on)")?\s*\/>/.test(pPr)) info.pbBefore = true;
+    return info;
+  }
+
+  /* ---------------- open ---------------- */
+
+  async function open(buf) {
+    const entries = readZip(buf);
+    const get = async (name) => {
+      const e = entries.find((x) => x.name === name);
+      return e ? new TextDecoder().decode(await entryBytes(e)) : null;
+    };
+    const docXml = await get("word/document.xml");
+    if (!docXml) throw new Error("This doesn't look like a Word document (word/document.xml is missing).");
+    const numbering = await get("word/numbering.xml");
+    const styles = await get("word/styles.xml");
+    // numId → abstractNumId, and each abstract list's number format per level.
+    const nums = {}, absFmt = {};
+    if (numbering) {
+      for (const m of numbering.matchAll(/<w:abstractNum\b[^>]*w:abstractNumId="(\d+)"[^>]*>([\s\S]*?)<\/w:abstractNum>/g)) {
+        absFmt[m[1]] = {};
+        for (const l of m[2].matchAll(/<w:lvl\b[^>]*w:ilvl="(\d+)"[^>]*>([\s\S]*?)<\/w:lvl>/g)) absFmt[m[1]][l[1]] = (l[2].match(/<w:numFmt w:val="(\w+)"/) || [])[1];
+      }
+      for (const m of numbering.matchAll(/<w:num\b[^>]*w:numId="(\d+)"[^>]*>([\s\S]*?)<\/w:num>/g)) nums[m[1]] = (m[2].match(/<w:abstractNumId w:val="(\d+)"/) || [])[1];
+    }
+    const styleNum = {};
+    if (styles) {
+      for (const m of styles.matchAll(/<w:style\b[^>]*w:styleId="([^"]+)"[^>]*>([\s\S]*?)<\/w:style>/g)) {
+        const np = m[2].match(/<w:numPr>([\s\S]*?)<\/w:numPr>/);
+        if (np) styleNum[m[1]] = { numId: (np[1].match(/<w:numId w:val="(\d+)"/) || [])[1], ilvl: +((np[1].match(/<w:ilvl w:val="(\d+)"/) || [])[1] || 0) };
+      }
+    }
+    const bodyOpen = docXml.indexOf("<w:body>");
+    const bodyClose = docXml.lastIndexOf("</w:body>");
+    if (bodyOpen < 0 || bodyClose < 0) throw new Error("Couldn't read the document body.");
+    const kids = children(docXml, bodyOpen + 8, bodyClose).map((c) => {
+      const xml = docXml.slice(c.s, c.e);
+      if (c.tag === "w:p") return { ...c, kind: "p", ...paraInfo(xml, styleNum) };
+      return { ...c, kind: c.tag === "w:tbl" ? "tbl" : c.tag === "w:sectPr" ? "sectPr" : "other", xml, text: textOf(xml), hasContent: true, pic: PIC_RE.test(xml) };
+    });
+    const fmt = (numId, ilvl) => (absFmt[nums[numId]] || {})[ilvl];
+    const extra = [];
+    for (const e of entries) if (/^word\/(header|footer)\d*\.xml$/.test(e.name)) extra.push({ name: e.name, xml: await get(e.name) });
+    return { entries, docXml, kids, fmt, nums, extra };
+  }
+
+  /* ---------------- find questions ---------------- */
+
+  const TYPED_RE = /^\s*(\d{1,3})\s*(?:[.):]|\t)/;
+  const isHeading = (k) => {
+    if (k.kind !== "p") return false;
+    const t = k.text.trim();
+    if (!t) return false;
+    if (/^(part|section)\s+(\w+)\b/i.test(t)) return true;
+    if (/^(?:the\s+)?end(?:\s+of\s+(?:the\s+)?(?:test|exam|quiz|section|part))?\b|^stop\b/i.test(t)) return true;
+    const letters = t.replace(/[^A-Za-z]/g, "");
+    if (letters.length >= 6 && letters === letters.toUpperCase() && !/^\(?[a-fA-F][.)]/.test(t)) return true;
+    return false;
+  };
+  const ESSAY_RE = /essay|show (?:all |your )*work|free[- ]response|open[- ]response|short answer|long answer|constructed response/i;
+  const MC_RE = /multiple[- ]choice|circle (?:the |your )?(?:best |correct )?answers?|choose the|bubble/i;
+
+  /* All numbered questions in the file, with their extent. */
+  function findItems(doc) {
+    const K = doc.kids;
+    // Mode 1: Word's automatic numbering — the most used list at level 0
+    // (plus other lists sharing its definition).
+    const counts = {};
+    K.forEach((k) => { if (k.numId && k.ilvl === 0 && /^decimal/.test(doc.fmt(k.numId, 0) || "decimal")) counts[k.numId] = (counts[k.numId] || 0) + 1; });
+    const main = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
+    const auto = [];
+    if (main) {
+      const abs = doc.nums[main];
+      K.forEach((k, i) => { if (k.numId && k.ilvl === 0 && (k.numId === main || (abs && doc.nums[k.numId] === abs))) auto.push({ num: auto.length + 1, start: i }); });
+    }
+    // Mode 2: typed numbers counting up from 1.
+    const typed = [];
+    K.forEach((k, i) => {
+      if (k.kind !== "p" || k.numId) return;
+      const m = k.text.match(TYPED_RE);
+      if (!m) return;
+      const n = +m[1], expect = typed.length + 1;
+      if (n === expect) typed.push({ num: n, start: i, numText: m[1] });
+      else if (n === expect + 1 && typed.length) {
+        // A skipped number: the last picture on its own line in the previous
+        // question is taken to be the missing one (number inside the picture).
+        const prev = typed[typed.length - 1];
+        let pic = -1;
+        for (let j = i - 1; j > prev.start; j--) if (K[j].kind === "p" && K[j].pic && !K[j].text.trim()) { pic = j; break; }
+        if (pic > 0) { typed.push({ num: expect, start: pic, picNum: true }); typed.push({ num: n, start: i, numText: m[1] }); }
+      }
+    });
+    const mode = auto.length >= typed.length ? (auto.length ? "auto" : null) : "typed";
+    const items = mode === "auto" ? auto : mode === "typed" ? typed : [];
+    const last = K.length && K[K.length - 1].kind === "sectPr" ? K.length - 1 : K.length;
+    items.forEach((it, n) => {
+      it.end = n + 1 < items.length ? items[n + 1].start : last;
+      // Content stops at a page break, section break or heading; from there on
+      // it's between questions and stays in place.
+      let ce = it.end;
+      for (let j = it.start; j < it.end; j++) {
+        const k = K[j];
+        if (j > it.start && (k.breakOnly || k.sect || isHeading(k) || k.leadBreak || k.pbBefore)) { ce = j; break; }
+        if (k.trailBreak || (j === it.start && k.sect)) { ce = j + 1; break; }
+      }
+      it.contentEnd = ce;
+      // Blank lines after the question (room to work) stay with the position,
+      // so each page keeps the spacing it was laid out with.
+      let be = ce;
+      while (be > it.start + 1 && K[be - 1].kind === "p" && !K[be - 1].hasContent && !K[be - 1].sect) be--;
+      it.bodyEnd = be;
+      it.leadBreak = !!(K[it.start].leadBreak || K[it.start].pbBefore);
+      const lastK = K[be - 1];
+      it.trailBreak = !!(lastK && lastK.kind === "p" && lastK.trailBreak);
+      const text = K.slice(it.start, be).map((k) => previewOf(k.xml)).join(" ").replace(/\s+/g, " ").trim();
+      const body = mode === "typed" && !it.picNum ? text.replace(TYPED_RE, "").trim() : text;
+      it.preview = it.picNum ? "(picture)" : body.length > 90 ? body.slice(0, 88) + "…" : body || "(equation or picture)";
+      it.choices = countChoices(doc, K.slice(it.start, be));
+      it.between = K.slice(ce, it.end);
+    });
+    // What the text between questions says about the questions after it.
+    let ctx = null;
+    const intro = K.slice(0, items.length ? items[0].start : 0);
+    const readCtx = (ks) => { for (const k of ks) { if (ESSAY_RE.test(k.text)) ctx = "essay"; else if (MC_RE.test(k.text)) ctx = "mc"; } };
+    readCtx(intro);
+    items.forEach((it) => {
+      it.ctx = ctx;
+      readCtx(it.between);
+    });
+    items.forEach((it, i) => {
+      it.mc = it.ctx !== "essay" && !!(it.choices >= 4 || (it.picNum && (!items[i - 1] || items[i - 1].choices >= 4) && (!items[i + 1] || items[i + 1].choices >= 4)));
+    });
+    return { mode, items };
+  }
+
+  /* Answer choices: labels a) b) c)… / (A) (B)… / A. B. … counted up from A,
+   * or items of a lettered Word list. */
+  function countChoices(doc, ks) {
+    const seen = new Set();
+    const lists = {};
+    for (const k of ks) {
+      for (const m of k.text.matchAll(/(?:^|\s)\(?([a-fA-F])[).](?=\s|$)/g)) seen.add(m[1].toLowerCase());
+      if (k.numId && /letter/i.test(doc.fmt(k.numId, k.ilvl) || "")) lists[k.numId + "/" + k.ilvl] = (lists[k.numId + "/" + k.ilvl] || 0) + 1;
+    }
+    let n = 0;
+    while (seen.has("abcdef"[n])) n++;
+    return Math.max(n, ...Object.values(lists), 0);
+  }
+
+  /* Pick which numbered questions are on the answer sheet, given how many the
+   * test has: the multiple-choice-looking ones, else the first n. */
+  function guessSelection(items, n) {
+    const mc = items.filter((it) => it.mc);
+    if (mc.length === n) return mc.map((it) => it.num);
+    if (mc.length > n) return mc.slice(0, n).map((it) => it.num);
+    return items.slice(0, n).map((it) => it.num);
+  }
+
+  /* Questions (in the shape MultiGrader's LaTeX support uses) for the chosen
+   * file numbers. Groups: consecutive chosen questions with no other question,
+   * heading or text between them. */
+  function parse(doc, found, sel) {
+    const { mode, items } = found;
+    if (!items.length) return { mode, items, questions: [], error: "No numbered questions found. MultiGrader looks for questions numbered with Word's automatic numbering, or typed as 1. 2. 3. at the start of a line." };
+    const chosen = new Set(sel);
+    const questions = [];
+    let block = 0, prevIdx = -2;
+    items.forEach((it, idx) => {
+      if (!chosen.has(it.num)) return;
+      if (questions.length) {
+        const prev = items[prevIdx];
+        const textBetween = prev.between.some((k) => k.kind !== "p" || k.sect || (k.text.trim() && !k.breakOnly));
+        if (idx !== prevIdx + 1 || textBetween) block++;
+      }
+      questions.push({ ...it, block, correctIdx: [], key: null, keyAll: false });
+      prevIdx = idx;
+    });
+    return { mode, items, questions, error: null };
+  }
+
+  /* ---------------- write a version ---------------- */
+
+  /* Replace characters [a, b) of a paragraph's w:t text with s. */
+  function editText(xml, a, b, s) {
+    let pos = 0, done = false;
+    return xml.replace(/(<w:t(?:\s[^>]*)?>)([^<]*)(<\/w:t>)/g, (m, open, raw, close) => {
+      const txt = decodeXml(raw);
+      const from = pos, to = pos + txt.length;
+      pos = to;
+      if (to <= a || from >= b) return m;
+      const keepL = txt.slice(0, Math.max(0, a - from)), keepR = txt.slice(Math.max(0, b - from));
+      const mid = done ? "" : s;
+      done = true;
+      const t = keepL + mid + keepR;
+      const o = /xml:space=/.test(open) || !/^\s|\s$/.test(t) ? open : open.replace(/<w:t/, '<w:t xml:space="preserve"');
+      return o + encodeXml(t) + close;
+    });
+  }
+  const wText = (xml) => [...xml.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g)].map((m) => decodeXml(m[1])).join("");
+
+  function renumber(pxml, num) {
+    const t = wText(pxml);
+    const m = t.match(/^(\s*)(\d{1,3})/);
+    if (!m) return pxml;
+    return editText(pxml, m[1].length, m[1].length + m[2].length, String(num));
+  }
+
+  const BREAK_RUN = '<w:r><w:br w:type="page"/></w:r>';
+  function removeFirst(xml, re) {
+    const m = xml.match(re);
+    return m ? xml.slice(0, m.index) + xml.slice(m.index + m[0].length) : xml;
+  }
+  function removeLast(xml, re) {
+    const all = [...xml.matchAll(new RegExp(re.source, "g"))];
+    if (!all.length) return xml;
+    const m = all[all.length - 1];
+    return xml.slice(0, m.index) + xml.slice(m.index + m[0].length);
+  }
+  const PB_ONE = /<w:br\s+w:type="page"\s*\/>/;
+  const PBB = /<w:pageBreakBefore(?:\s+w:val="(?:1|true|on)")?\s*\/>/;
+  function addLeadBreak(pxml) {
+    const m = pxml.match(/^<w:p\b[^>]*>(\s*<w:pPr>[\s\S]*?<\/w:pPr>)?/);
+    return pxml.slice(0, m[0].length) + BREAK_RUN + pxml.slice(m[0].length);
+  }
+  function addTrailBreak(pxml) {
+    const i = pxml.lastIndexOf("</w:p>");
+    return pxml.slice(0, i) + BREAK_RUN + pxml.slice(i);
+  }
+
+  /* document.xml with question perm[k] in position k. */
+  function reorder(doc, parsed, perm) {
+    const K = doc.kids, xml = doc.docXml;
+    const qs = parsed.questions;
+    // The content of each question, without the page breaks at its edges.
+    const content = qs.map((q) => {
+      const parts = K.slice(q.start, q.bodyEnd).map((k) => k.xml);
+      if (q.leadBreak) parts[0] = removeFirst(removeFirst(parts[0], PBB), PB_ONE);
+      if (q.trailBreak) parts[parts.length - 1] = removeLast(parts[parts.length - 1], PB_ONE);
+      return parts;
+    });
+    let out = "", prev = 0;
+    qs.forEach((slot, k) => {
+      const q = qs[perm[k]];
+      if (q === slot) { // unchanged position: copy as is
+        out += xml.slice(prev, K[slot.bodyEnd - 1].e);
+        prev = K[slot.bodyEnd - 1].e;
+        return;
+      }
+      const parts = content[perm[k]].slice();
+      if (parsed.mode === "typed" && !q.picNum && q.num !== slot.num) parts[0] = renumber(parts[0], slot.num);
+      if (slot.leadBreak && K[q.start].kind === "p") parts[0] = addLeadBreak(parts[0]);
+      if (slot.trailBreak) {
+        const lastK = K[q.bodyEnd - 1];
+        if (lastK.kind === "p") parts[parts.length - 1] = addTrailBreak(parts[parts.length - 1]);
+        else parts.push(`<w:p>${BREAK_RUN}</w:p>`);
+      }
+      out += xml.slice(prev, K[slot.start].s) + parts.join("");
+      prev = K[slot.bodyEnd - 1].e;
+    });
+    return out + xml.slice(prev);
+  }
+
+  /* "Version A" → "Version B" in the text (document, headers, footers). */
+  function relabel(xml, v) {
+    let count = 0;
+    const out = xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (p) => {
+      let t = wText(p), q = p;
+      const re = /\bVersion\s*[:\-]?\s*A\b/g;
+      let m;
+      const hits = [];
+      while ((m = re.exec(t))) hits.push(m.index + m[0].length - 1);
+      for (const at of hits.reverse()) { q = editText(q, at, at + 1, v); count++; }
+      return q;
+    });
+    return { xml: out, count };
+  }
+
+  async function build(doc, parsed, perm, v) {
+    const rl = relabel(reorder(doc, parsed, perm), v);
+    const replaced = new Map([["word/document.xml", rl.xml]]);
+    let count = rl.count;
+    for (const x of doc.extra) {
+      const r = relabel(x.xml, v);
+      if (r.count) { replaced.set(x.name, r.xml); count += r.count; }
+    }
+    const moved = parsed.questions.filter((q, k) => q.picNum && perm.indexOf(k) !== k).map((q) => q.num);
+    return { blob: await writeZip(doc.entries, replaced), count, picMoved: moved };
+  }
+
+  root.MGDocx = { open, findItems, guessSelection, parse, reorder, relabel, build, _internal: { readZip, writeZip, entryBytes, crc32, children, textOf } };
+})(typeof window !== "undefined" ? window : globalThis);
