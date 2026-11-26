@@ -847,8 +847,7 @@
     }
     el.innerHTML = `
       <h2>Upload your Word or LaTeX file here</h2>
-      <p class="muted small">Optional. Upload your test (Version A) as a Word (<code>.docx</code>) or LaTeX (<code>.tex</code>) file, and MultiGrader sets up the question format from its multiple-choice questions, leaving out free-response questions. You can still change the format below.
-        With versions, you get a new file for each version with the questions in that version's order, and that version's key is set automatically. Answer choices will stay the same.</p>
+      <p class="muted small">Optional. Upload your test (Version A) as a Word (<code>.docx</code>) or LaTeX (<code>.tex</code>) file, and MultiGrader sets up the question format from its multiple-choice questions (leaving out free-response questions). You can still modify the format below. Scroll down past Answer Key to generate new versions with questions in a different order.</p>
       <div class="btn-row">
         <label class="btn" for="tex-in">${tex ? "Upload a different file…" : "Upload your test (.docx or .tex)…"}</label>
         <input type="file" id="tex-in" accept=".tex,.docx,text/x-tex,application/x-tex,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" class="visually-hidden" />
@@ -936,7 +935,7 @@
     const locked = formatLocked(t);
     const ranges = sectionRanges(t);
     el.innerHTML = `
-      <h2>Versions</h2>
+      <h2>Versions (new question order, same answer choices)</h2>
       <div class="form-row">
         <label>Number of versions <span class="muted small">(locked once answer sheets are printed)</span>
           <select id="v-count" ${locked ? "disabled" : ""}>${L.VERSION_LABELS.map((l, i) => `<option value="${i + 1}" ${labels.length === i + 1 ? "selected" : ""}>${i === 0 ? "1 (no versions)" : `${i + 1} (A–${l})`}</option>`).join("")}</select>
@@ -1790,7 +1789,7 @@
             <canvas id="overlay"></canvas>
             <div id="flash" class="flash"></div>
           </div>
-          <div id="scan-status" class="scan-status">${t ? `Scan the sheets for <strong>${esc(ttl(t))}</strong>, in any order. (A sheet from another test is recorded for that test.)` : "Any sheet from any of your tests can be scanned here, in any order; each sheet's code tells MultiGrader which test and student it is."}</div>
+          <div id="scan-status" class="scan-status">${t ? `Scan the sheets for <strong>${esc(ttl(t))}</strong>, in any order.` : "Any sheet from any of your tests can be scanned here, in any order; each sheet's code tells MultiGrader which test and student it is."}</div>
           <details class="help">
             <summary>Tips for clean scans</summary>
             <ul>
