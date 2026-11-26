@@ -159,6 +159,8 @@ details.help li { margin: 4px 0; }
 .sec-custom { width: 110px; text-transform: uppercase; }
 .sec-btns { display: flex; gap: 4px; margin-left: auto; }
 .add-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.copy-format { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.copy-format select { max-width: 100%; }
 
 .key-sec { border-top: 1px solid var(--line); padding: 12px 0 6px; }
 .key-sec-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }

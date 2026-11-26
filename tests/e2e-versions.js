@@ -183,6 +183,26 @@ function assert(cond, msg) { if (!cond) throw new Error("ASSERT: " + msg); conso
   assert(/^7\//.test((await page.textContent(".score-big")).trim()), "back to B: 7/10");
   await page.click("#m-done");
 
+  // ---- a new test copies Quiz 5's format ----
+  await page.goto(base + "/#/tests");
+  await page.click("#new-test");
+  await page.waitForSelector("#copy-fmt");
+  const vlabel = (await page.textContent("label:has(#v-count)")).replace(/\s+/g, " ");
+  assert(/Number of versions \(locked once answer sheets are printed\)/.test(vlabel), "versions label mentions the lock");
+  const optText = await page.$eval("#copy-fmt", (s) => [...s.options].map((o) => o.textContent).join(" | "));
+  assert(/Quiz 5 · 10 questions, 2 versions/.test(optText), "copy list shows other tests with their size: " + optText);
+  await page.selectOption("#copy-fmt", { label: optText.split(" | ").find((x) => x.startsWith("Quiz 5")) });
+  await page.waitForFunction(() => document.querySelectorAll(".sec-row").length === 2);
+  const copied = await page.evaluate(() => { const t = MGStore.db.tests[0]; return { secs: t.sections.map((x) => `${x.count}${x.type}`).join(","), v: t.versionCount, key: MGStore.flatKey(t).filter(Boolean).length, title: t.title }; });
+  assert(copied.secs === "6AD,4TF" && copied.v === 2 && copied.key === 0 && copied.title === "", "format copied (6 A–D, 4 T/F, 2 versions); key and title left empty");
+  assert(/10 questions/.test(await page.textContent("#format-summary")), "summary updated");
+  // with a key entered, copying asks first; Cancel keeps everything
+  await (await page.$$(".key-quick"))[0].fill("ABCDAB");
+  await page.waitForTimeout(300);
+  page.once("dialog", (d) => d.dismiss());
+  await page.selectOption("#copy-fmt", { index: 1 });
+  assert((await page.evaluate(() => MGStore.flatKey(MGStore.db.tests[0]).filter(Boolean).length)) === 6, "Cancel keeps the key");
+
   assert(errors.length === 0, "no page errors" + (errors.length ? ": " + errors.join(" | ") : ""));
   await browser.close();
   srv.close();

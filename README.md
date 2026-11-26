@@ -30,6 +30,10 @@ stored in your browser on your device.
      no partial credit.
 
    A tag on each multi-letter row switches between the two.
+
+   To reuse a layout, **Copy the format of another test** (under the format)
+   copies its sections, points and number of versions; the key stays empty.
+   **Duplicate** on the Tests page copies a whole test, key included.
 3. **Print.** **⬇ Download PDF** gives one Letter-size page per sheet: one for
    each student with their name on it, plus optional blank sheets (the student
    writes a name, and you match it after scanning) and an answer-key sheet you

@@ -322,7 +322,11 @@
         <span class="muted small">Add section:</span>
         ${[["TF", "T/F"], ["ASN", "A/S/N"], ["AD", "A–D"], ["AE", "A–E"], ["custom", "Custom"]].map(([id, n]) => `<button class="btn small" data-add="${id}">+ ${n}</button>`).join("")}
       </div>`}
-      <p id="format-summary" class="muted small"></p>`;
+      <p id="format-summary" class="muted small"></p>
+      ${!locked && St.db.tests.some((x) => x !== t) ? `<div class="copy-format">
+        <label>Copy the format of another test
+          <select id="copy-fmt"><option value="">Choose a test…</option>${St.db.tests.filter((x) => x !== t).map((x) => `<option value="${x.id}">${esc(ttl(x))} · ${L.questionChoices(x).length} questions${L.versionLabels(x).length > 1 ? `, ${L.versionLabels(x).length} versions` : ""}</option>`).join("")}</select></label>
+      </div>` : ""}`;
 
     const fmtChanged = () => { saveSoon(t); updateRanges(t); renderKey(t); renderVersions(t); updatePreview(t); };
     $$(".sec-row").forEach((row) => {
@@ -354,6 +358,22 @@
       t.sections.push({ id: St.uid(), count: 5, type: b.dataset.add, custom: b.dataset.add === "custom" ? "ABCD" : undefined, points: 1, key: [] });
       fmtChanged(); renderFormat(t);
     }));
+    const cf = $("#copy-fmt");
+    if (cf) cf.onchange = () => {
+      const src = St.getTest(cf.value);
+      if (!src) return;
+      const hasKey = St.flatKey(t).some(Boolean);
+      const hasOrders = t.versionOrders && Object.keys(t.versionOrders).length;
+      if ((hasKey || hasOrders) && !confirm(`Use the question format of "${ttl(src)}"? This test's current sections${hasKey ? ", answer key" : ""}${hasOrders ? " and version orders" : ""} will be replaced.`)) { cf.value = ""; return; }
+      // Sections, points and number of versions; the key stays empty.
+      t.sections = src.sections.map((x) => ({ id: St.uid(), count: x.count, type: x.type, custom: x.custom, points: x.points, key: [] }));
+      t.versionCount = src.versionCount || 1;
+      delete t.versionOrders; delete t.versionLocks; delete t.fixedQuestions; delete t.texBlocks;
+      if (ui(t).undo) delete ui(t).undo;
+      saveSoon(t);
+      renderFormat(t); renderKey(t); renderVersions(t); updatePreview(t);
+      toast(`Copied the format of "${ttl(src)}": ${L.questionChoices(t).length} questions${L.versionLabels(t).length > 1 ? `, ${L.versionLabels(t).length} versions` : ""}. Enter this test's answer key below.`);
+    };
     const un = $("#unlock");
     if (un) un.onclick = () => {
       const n = St.scansFor(t).length;
@@ -710,7 +730,7 @@
     }
     return `
       <div class="tex-box">
-        <div class="ver-head"><strong>From your LaTeX or Word file</strong></div>
+        <div class="ver-head"><strong>Upload your Word or LaTeX file here</strong></div>
         <p class="muted small">Upload Version A as a LaTeX (<code>.tex</code>) or Word (<code>.docx</code>) file. For each version you get a new file with the questions in that version's order, and that version's key is set automatically. Answer choices will stay the same.</p>
         <div class="btn-row">
           <label class="btn" for="tex-in">${tex ? "Upload a different file…" : "Upload Version A (.tex or .docx)…"}</label>
@@ -733,13 +753,11 @@
     el.innerHTML = `
       <h2>Versions</h2>
       <div class="form-row">
-        <label>Number of versions
+        <label>Number of versions <span class="muted small">(locked once answer sheets are printed)</span>
           <select id="v-count" ${locked ? "disabled" : ""}>${L.VERSION_LABELS.map((l, i) => `<option value="${i + 1}" ${labels.length === i + 1 ? "selected" : ""}>${i === 0 ? "1 (no versions)" : `${i + 1} (A–${l})`}</option>`).join("")}</select>
         </label>
       </div>
-      ${locked ? `<p class="muted small">Once answer sheets are printed, the number of versions is locked.</p>` : ""}
       ${labels.length < 2 ? `<p class="muted small">Same questions, different order. Each sheet gets a VERSION row for students to bubble, each sheet is graded with its version's key, and results and item analysis use Version A's question numbers.</p>` : `
-      <p class="muted small">Version A uses the answer key that's set above. For other versions, list the Version A question numbers in a new order, or click Shuffle. Questions will only move within their own section.</p>
       ${texPanel(t, labels)}
       ${labels.slice(1).map((v) => {
         const vLocked = verLocked(t, v);
