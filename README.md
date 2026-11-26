@@ -19,7 +19,11 @@ stored in your browser on your device.
    Screenshots are read in the browser with the bundled Tesseract OCR engine
    (`vendor/tesseract`). Nothing is uploaded, but it can drop accents
    (Román → Roman), so check the preview.
-2. **Build.** Create a test and list its sections, for example *5 × True/False,
+2. **Build.** Create a test. If you have it as a Word (`.docx`) or LaTeX
+   (`.tex`) file, upload it under **Upload your Word or LaTeX file here**:
+   MultiGrader sets up the question format from its multiple-choice questions
+   (see [Setting up from your test file](#setting-up-from-your-test-file)).
+   Or list the sections yourself, for example *5 × True/False,
    4 × Always/Sometimes/Never, 16 × A–E*, with points per question. The answer
    sheet is generated from that format, so there's no separate sheet to set up
    and no library of old sheets. Enter the key by typing letters into each
@@ -76,6 +80,30 @@ stored in your browser on your device.
      stays on (even after reloading the page) until you click
      **Show individual scores**.
 
+### Setting up from your test file
+
+On the Build tab, under Details, **Upload your Word or LaTeX file here** takes
+your test (Version A) as `.docx` or `.tex`:
+
+- MultiGrader picks out the **multiple-choice questions** and leaves out
+  free-response ones. It uses answer choices, question macros
+  (`\TFQuestion`, `\MCQuestion`…) and headings such as "True or False",
+  "Always, Sometimes, or Never", "Multiple choice", "Free response" or
+  "Show all work". The list is shown as file numbers (for example
+  `1–8, 16–22`), and you can change it.
+- For a new test (no key yet), it **sets up the question format**: one bubble
+  type per question from its choices (a–d → A–D, True/False, Always/Sometimes/
+  Never), with questions of the same type grouped into a section. If the file
+  marks the answers (LaTeX `\CorrectChoice` or answer macros), the **key is
+  filled in** too. Choosing other questions updates the format while it's
+  still the file's.
+- You can still change the format by hand. The upload card then shows what the
+  file suggests, with **Use the format from the file** to go back to it. A test
+  that already has a key keeps its format when you upload; the file is matched
+  to it instead.
+- Where a file doesn't write out the choices (a LaTeX macro with the answer
+  only), enough letters for the answers are used, at least A–D.
+
 ### Versions
 
 Under **Build → Versions**, choose 2–6 versions (A–F). Version A uses the
@@ -102,7 +130,7 @@ you can check it against your printed test.
 
 #### Making the versions from your LaTeX file
 
-In the Versions card, **Upload Version A (.tex or .docx)…**. MultiGrader finds the
+Upload Version A under **Upload your Word or LaTeX file here** (Build tab). MultiGrader finds the
 questions: `\question` (also `\titledquestion` and `\bonusquestion`) inside
 `questions` in the exam class, or `\item` in top-level numbered `enumerate`
 lists, which may be spread over several lists. Click **Shuffle**, then
@@ -265,6 +293,7 @@ node tests/e2e-versions.js        # versions, either / all-required keys, missin
 node tests/latex-test.js          # finding and reordering questions in .tex files
 node tests/e2e-latex.js           # upload .tex → key from \CorrectChoice → shuffle → download
 node tests/e2e-docx.js            # upload .docx → answer-sheet questions → shuffle → download
+node tests/e2e-upload.js          # upload sets up the question format (Word and LaTeX), free response left out
 node tests/docx-stress-test.js    # 300 random Word tests × structures; shuffled files complete and correct
 node tests/pdf-test.js            # PDF download: page size, text, every page scans (needs poppler-utils)
 node tests/roster-test.js         # roster text formats (CSV/spreadsheet/OCR lines, Form)

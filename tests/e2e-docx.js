@@ -70,7 +70,7 @@ const firstText = (doc, it) => doc.kids[it.start].text;
   await page.dispatchEvent(".sec-row[data-i='0'] .sec-count", "change");
   await (await page.$$(".key-quick"))[0].fill("CCCABBBBB");
   await page.selectOption("#v-count", "2");
-  await page.waitForSelector(".tex-box");
+  await page.waitForSelector("#upload-card");
 
   // an old .doc is explained, not misread
   let alertText = "";
@@ -81,24 +81,24 @@ const firstText = (doc, it) => doc.kids[it.start].text;
   assert(/Save As → Word Document \(\.docx\)/.test(alertText), ".doc upload: asks to save as .docx");
 
   await page.setInputFiles("#tex-in", path.join(FIX, "word-typed-sample.docx"));
-  await page.waitForFunction(() => /found all 9 questions for the answer sheet/.test(document.querySelector(".tex-box").textContent));
-  const box = (await page.textContent(".tex-box")).replace(/\s+/g, " ");
+  await page.waitForFunction(() => /found all 9 questions for the answer sheet/.test(document.querySelector("#upload-card").textContent));
+  const box = (await page.textContent("#upload-card")).replace(/\s+/g, " ");
   assert(/found 11 numbered questions \(typed question numbers\)/.test(box), "panel: 11 numbered questions found");
-  assert((await page.inputValue("#docx-sel")) === "1–6, 9–11", "answer-sheet questions prefilled: 1–6, 9–11");
+  assert((await page.inputValue("#src-sel")) === "1–6, 9–11", "answer-sheet questions prefilled: 1–6, 9–11");
   assert(/Numbering on the answer sheet: Q1–6 = file 1–6, Q7–9 = file 9–11/.test(box), "file numbers vs answer-sheet numbers explained");
   assert(/Q4 is a picture with its number inside, so it stays in place/.test(box), "picture question is kept in place");
   assert(/2 groups of questions/.test(box), "groups explained");
   assert(/\.docx/.test(await page.textContent(".ver-block[data-v='B'] [data-texdl]")), "download button says .docx");
 
   // a wrong selection is explained; fixing it re-enables the download
-  await page.fill("#docx-sel", "1-6");
-  await page.dispatchEvent("#docx-sel", "change");
-  await page.waitForSelector(".tex-box .notice.bad");
-  assert(/You've chosen 6 questions for the answer sheet, but this test has 9/.test(await page.textContent(".tex-box")), "count mismatch explained");
+  await page.fill("#src-sel", "1-6");
+  await page.dispatchEvent("#src-sel", "change");
+  await page.waitForSelector("#upload-card .notice.bad");
+  assert(/You've chosen 6 questions from the file for the answer sheet, but this test's format has 9/.test(await page.textContent("#upload-card")), "count mismatch explained");
   assert(await page.$eval("[data-texdl]", (b) => b.disabled), "download disabled while the count is wrong");
-  await page.fill("#docx-sel", "1 to 6, 9-11");
-  await page.dispatchEvent("#docx-sel", "change");
-  await page.waitForFunction(() => /found all 9 questions/.test(document.querySelector(".tex-box").textContent));
+  await page.fill("#src-sel", "1 to 6, 9-11");
+  await page.dispatchEvent("#src-sel", "change");
+  await page.waitForFunction(() => /found all 9 questions/.test(document.querySelector("#upload-card").textContent));
   assert(!(await page.$eval("[data-texdl]", (b) => b.disabled)), "fixed selection: download enabled");
 
   let perm;
@@ -131,7 +131,7 @@ const firstText = (doc, it) => doc.kids[it.start].text;
   assert(zipNames(fs.readFileSync(await dl.path())) === zipNames(typedBuf), "every part of the original file is kept (picture included)");
 
   if (process.argv[2]) {
-    await (await page.$(".tex-box")).scrollIntoViewIfNeeded();
+    await (await page.$("#upload-card")).scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(process.argv[2], "docx-panel.png"), fullPage: true });
   }
 

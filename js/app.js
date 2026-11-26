@@ -256,6 +256,8 @@
             </div>
           </section>
 
+          <section class="card upload-card" id="upload-card"></section>
+
           <section class="card">
             <h2>Question format</h2>
             <div id="format"></div>
@@ -288,6 +290,7 @@
       t.classIds = cb.checked ? [...new Set([...t.classIds, id])] : t.classIds.filter((x) => x !== id);
       saveSoon(t); updatePreview(t);
     }));
+    renderUpload(t);
     renderFormat(t);
     renderKey(t);
     renderVersions(t);
@@ -328,7 +331,7 @@
           <select id="copy-fmt"><option value="">Choose a test…</option>${St.db.tests.filter((x) => x !== t).map((x) => `<option value="${x.id}">${esc(ttl(x))} · ${L.questionChoices(x).length} questions${L.versionLabels(x).length > 1 ? `, ${L.versionLabels(x).length} versions` : ""}</option>`).join("")}</select></label>
       </div>` : ""}`;
 
-    const fmtChanged = () => { saveSoon(t); updateRanges(t); renderKey(t); renderVersions(t); updatePreview(t); };
+    const fmtChanged = () => { saveSoon(t); updateRanges(t); renderKey(t); renderVersions(t); renderUpload(t); updatePreview(t); };
     $$(".sec-row").forEach((row) => {
       const s = t.sections[+row.dataset.i];
       // Apply the count while typing (debounced), so leaving the field doesn't
@@ -371,7 +374,7 @@
       delete t.versionOrders; delete t.versionLocks; delete t.fixedQuestions; delete t.texBlocks;
       if (ui(t).undo) delete ui(t).undo;
       saveSoon(t);
-      renderFormat(t); renderKey(t); renderVersions(t); updatePreview(t);
+      renderFormat(t); renderKey(t); renderVersions(t); renderUpload(t); updatePreview(t);
       toast(`Copied the format of "${ttl(src)}": ${L.questionChoices(t).length} questions${L.versionLabels(t).length > 1 ? `, ${L.versionLabels(t).length} versions` : ""}. Enter this test's answer key below.`);
     };
     const un = $("#unlock");
@@ -379,7 +382,7 @@
       const n = St.scansFor(t).length;
       if (!confirm(`Sheets you've already printed for this test will no longer scan once the format changes — you'll need to reprint them.${n ? `\n\nThe ${n} sheet(s) already scanned are kept, but their answers may no longer line up with the new questions.` : ""}\n\nContinue?`)) return;
       St.resetFormat(t);
-      renderFormat(t); renderVersions(t); updatePreview(t);
+      renderFormat(t); renderVersions(t); renderUpload(t); updatePreview(t);
     };
     updateRanges(t);
   }
@@ -456,7 +459,7 @@
         const k = quickToKey(e.target.value, ch, n);
         s.key = Array.from({ length: n }, (_, i) => k[i] || "");
         $$(".key-row", sec).forEach((row, i) => paintKeyRow(row, s.key[i]));
-        saveSoon(t); renderKeyStatus(t); renderVersions(t);
+        saveSoon(t); renderKeyStatus(t); renderVersions(t); renderUpload(t);
       };
       sec.onclick = (e) => {
         const mode = e.target.closest(".kmode");
@@ -475,7 +478,7 @@
         s.key[i] = k;
         paintKeyRow(row, k);
         $(".key-quick", sec).value = keyToQuick(s.key, n);
-        saveSoon(t); renderKeyStatus(t); renderVersions(t);
+        saveSoon(t); renderKeyStatus(t); renderVersions(t); renderUpload(t);
       };
     });
     renderKeyStatus(t);
@@ -591,9 +594,7 @@
     const p = tex.parsed;
     const out = { ok: !p.error && p.questions.length === qc.length, warnings: [], keyFromTex: [], keyDiffs: [] };
     if (p.error) out.error = p.error;
-    else if (p.questions.length !== qc.length) out.error = tex.kind === "docx"
-      ? `You've chosen ${p.questions.length} question${p.questions.length === 1 ? "" : "s"} for the answer sheet, but this test has ${qc.length}. Change the list of question numbers below.`
-      : `Found ${p.questions.length} question${p.questions.length === 1 ? "" : "s"} in the file, but this test has ${qc.length}. Check the list of what was found below; the question count and order must match the test's format.`;
+    else if (p.questions.length !== qc.length) out.error = `You've chosen ${p.questions.length} question${p.questions.length === 1 ? "" : "s"} from the file for the answer sheet, but this test's format has ${qc.length}. Change the list of questions above, or use the format found in the file.`;
     if (!out.ok) return out;
     p.questions.forEach((q, i) => {
       if (q.choices && q.choices !== qc[i].length) out.warnings.push(`Q${i + 1} has ${q.choices} answer choices in the file, but the test format gives it ${qc[i].length} (${qc[i].join("")}).`);
@@ -678,20 +679,136 @@
     return out.map(([a, b]) => (a === b ? `Q${a}` : `Q${a}–${b}`));
   }
 
-  function texPanel(t, labels) {
+  /* --- Upload: the test as a Word or LaTeX file --- */
+
+  // Every numbered question in the file, with whether it looks like an
+  // answer-sheet question and its kind (TF / ASN / YN, or lettered choices).
+  function srcItems(tex) {
+    if (tex.kind === "docx") return tex.found.items;
+    const p = tex.full;
+    if (p.error) return [];
+    const cls = MGLatex.classify(tex.text, p);
+    return p.questions.map((q, i) => ({ ...q, num: i + 1, mc: cls[i].mc, kind: cls[i].kind }));
+  }
+  // The answer-sheet questions chosen (file numbers), as questions with groups.
+  function srcParse(tex) {
+    if (tex.kind === "docx") { tex.parsed = MGDocx.parse(tex.doc, tex.found, tex.sel); return; }
+    const p = tex.full;
+    if (p.error) { tex.parsed = { mode: p.mode, items: [], questions: [], error: p.error }; return; }
+    const items = srcItems(tex);
+    const chosen = new Set(tex.sel);
+    const questions = [];
+    let block = 0, prev = null;
+    items.forEach((it, i) => {
+      if (!chosen.has(it.num)) return;
+      if (prev && (i !== prev.i + 1 || it.block !== prev.block)) block++;
+      questions.push({ ...it, block });
+      prev = { i, block: it.block };
+    });
+    tex.parsed = { mode: p.mode, items, questions, error: null };
+  }
+  // Which questions are on the answer sheet: the multiple-choice ones (or, to
+  // match a format already set, that many of them).
+  function guessSel(items, n) {
+    const mc = items.filter((it) => it.mc);
+    const pool = mc.length ? mc : items;
+    if (n == null || pool.length === n) return pool.map((it) => it.num);
+    if (pool.length > n) return pool.slice(0, n).map((it) => it.num);
+    return items.slice(0, n).map((it) => it.num);
+  }
+
+  /* The question format the file suggests: one bubble type per question,
+   * consecutive questions of the same type forming a section. */
+  const LETTER_TYPES = [null, null, "AB", "AC", "AD", "AE", "AF"];
+  function detectFormat(tex) {
+    const qs = tex.parsed.questions;
+    // Choices not written out (e.g. a LaTeX macro): enough letters for the
+    // answers given with that macro, at least A–D.
+    const macroMax = {};
+    for (const q of qs) for (const k of q.key || []) if (/^[A-F]$/.test(k) && q.keyMacro) macroMax[q.keyMacro] = Math.max(macroMax[q.keyMacro] || 0, "ABCDEF".indexOf(k) + 1);
+    let types = qs.map((q) => {
+      if (q.kind) return q.kind;
+      if (q.choices >= 2) return LETTER_TYPES[Math.min(6, q.choices)];
+      if (q.keyMacro && macroMax[q.keyMacro]) return LETTER_TYPES[Math.max(4, macroMax[q.keyMacro])];
+      return null;
+    });
+    // Others (a picture question…) take their neighbours' type.
+    types = types.map((ty, i) => {
+      if (ty) return ty;
+      for (let d = 1; d < qs.length; d++) {
+        if (types[i - d] && qs[i - d].block === qs[i].block) return types[i - d];
+        if (types[i + d] && qs[i + d] && qs[i + d].block === qs[i].block) return types[i + d];
+      }
+      return types.find(Boolean) || "AE";
+    });
+    const out = [];
+    for (const ty of types) {
+      const last = out[out.length - 1];
+      if (last && last.type === ty) last.count++; else out.push({ type: ty, count: 1 });
+    }
+    return out;
+  }
+  const typeName = (ty) => (L.PRESETS.find((p) => p.id === ty) || {}).name || ty;
+  const fmtText = (secs) => secs.map((x) => `${x.count} × ${typeName(x.type)}`).join(", ");
+  const formatSig = (secs) => secs.map((x) => `${x.count}${x.type === "custom" ? "custom:" + x.custom : x.type}`).join(",");
+
+  /* Set the test's question format to the one found in the file. When the
+   * file marks answers (LaTeX), those fill the key. */
+  function applyDetected(t) {
+    const tex = ui(t).tex;
+    const secs = detectFormat(tex);
+    t.sections = secs.map((x) => ({ id: St.uid(), count: x.count, type: x.type, points: 1, key: [] }));
+    delete t.versionOrders; delete t.versionLocks; delete t.fixedQuestions; delete t.texBlocks;
+    if (ui(t).undo) delete ui(t).undo;
+    const chk = texCheck(t);
+    let keyed = 0;
+    if (chk && chk.ok) {
+      const ranges = sectionRanges(t);
+      chk.keyFromTex.forEach((k, i) => {
+        if (!k) return;
+        const si = ranges.findIndex((r) => i >= r.start && i <= r.end);
+        t.sections[si].key[i - ranges[si].start] = k;
+        keyed++;
+      });
+      t.texBlocks = tex.parsed.questions.map((q) => q.block);
+    }
+    tex.appliedSig = formatSig(t.sections);
+    tex.appliedKey = JSON.stringify(St.flatKey(t));
+    saveSoon(t);
+    return { secs, keyed };
+  }
+  // The format (and key) are still exactly what the file set up.
+  const stillFromFile = (t, tex) => tex.appliedSig === formatSig(t.sections) && tex.appliedKey === JSON.stringify(St.flatKey(t));
+  const canSetFormat = (t) => !formatLocked(t) && !St.flatKey(t).some(Boolean) && !(t.versionOrders && Object.keys(t.versionOrders).length);
+
+  function refreshAll(t) { renderUpload(t); renderFormat(t); renderKey(t); renderVersions(t); updatePreview(t); }
+
+  function renderUpload(t) {
+    const el = $("#upload-card");
+    if (!el) return;
     const tex = ui(t).tex;
     const chk = texCheck(t);
     const fk = St.flatKey(t);
-    const fixed = (t.fixedQuestions || []).join(" ");
     let body = "";
     if (tex) {
       const p = tex.parsed;
+      const items = p.items || [];
       const how = { exam: "exam class \\question", enumerate: "numbered list \\item", auto: "Word's automatic numbering", typed: "typed question numbers" }[p.mode] || "";
-      if (tex.kind === "docx" && p.items && p.items.length) {
+      if (!items.length) body += `<div class="notice bad small"><strong>${esc(tex.name)}</strong>: ${esc(p.error || "No questions found.")}</div>`;
+      else {
         const sel = p.questions.map((q) => q.num);
-        body += `<p class="small"><strong>${esc(tex.name)}</strong>: found ${p.items.length} numbered question${p.items.length === 1 ? "" : "s"} (${how}).</p>
-          <div class="form-row docx-sel"><label class="grow">Questions on the answer sheet <span class="muted small">(numbers as in your Word file; the others stay where they are)</span>
-            <input id="docx-sel" value="${esc(numRanges(sel))}" placeholder="e.g. 1-8, 16-22" spellcheck="false" autocomplete="off" /></label></div>`;
+        const free = items.length - sel.length;
+        body += `<p class="small"><strong>${esc(tex.name)}</strong>: found ${items.length} numbered question${items.length === 1 ? "" : "s"} (${how}).</p>
+          <div class="form-row src-sel"><label class="grow">Multiple-choice questions for the answer sheet <span class="muted small">(numbers as in your file${free ? `; the other ${free} ${free === 1 ? "stays" : "stay"} where ${free === 1 ? "it is" : "they are"}` : ""})</span>
+            <input id="src-sel" value="${esc(numRanges(sel))}" placeholder="e.g. 1-8, 16-22" spellcheck="false" autocomplete="off" /></label></div>`;
+        if (sel.length) {
+          const det = detectFormat(tex);
+          const same = formatSig(det) === formatSig(t.sections.map((x) => ({ count: x.count, type: x.type, custom: x.custom })));
+          if (same) body += `<p class="good-txt small">Question format: ${esc(fmtText(det))}, as found in the file (found all ${sel.length} questions for the answer sheet) ✓</p>`;
+          else if (formatLocked(t)) body += `<p class="muted small">Found in the file: ${esc(fmtText(det))}. Answer sheets are already printed, so the question format below stays as it is.</p>`;
+          else body += `<div class="notice small">Found in the file: <strong>${esc(fmtText(det))}</strong>. The question format below is different.
+              <button class="btn small primary" id="use-detected">Use the format from the file</button></div>`;
+        }
         if (chk.ok && sel.some((n, i) => n !== i + 1)) {
           // Runs where answer-sheet and file numbers go up together.
           const runs = [];
@@ -699,13 +816,13 @@
           const rng = (a, b) => (a === b ? `${a}` : `${a}–${b}`);
           body += `<p class="muted small">Numbering on the answer sheet: ${runs.map((r) => `Q${rng(r.q1, r.q2)} = file ${rng(r.f1, r.f2)}`).join(", ")}.</p>`;
         }
+        const asFound = sel.length && formatSig(detectFormat(tex)) === formatSig(t.sections);
+        if (!chk.ok) body += `<div class="notice bad small">${esc(chk.error)}</div>`;
+        else if (!asFound) body += `<p class="good-txt small">found all ${p.questions.length} questions for the answer sheet ✓</p>`;
       }
-      body += chk.ok
-        ? `<p class="good-txt small">${tex.kind === "docx" ? "" : `<strong>${esc(tex.name)}</strong>: `}found all ${p.questions.length} questions${tex.kind === "docx" ? " for the answer sheet" : ` (${how})`} ✓</p>`
-        : `<div class="notice bad small">${tex.kind === "docx" ? "" : `<strong>${esc(tex.name)}</strong>: `}${esc(chk.error)}</div>`;
       const pins = picPinned(t);
-      if (chk.ok && pins.length) body += `<p class="muted small">Q${pins.join(", Q")} ${pins.length > 1 ? "are pictures with their numbers" : "is a picture with its number"} inside, so ${pins.length > 1 ? "they stay" : "it stays"} in place when shuffling.</p>`;
-      if (chk.ok) {
+      if (chk.ok && pins.length && L.versionLabels(t).length > 1) body += `<p class="muted small">Q${pins.join(", Q")} ${pins.length > 1 ? "are pictures with their numbers" : "is a picture with its number"} inside, so ${pins.length > 1 ? "they stay" : "it stays"} in place when shuffling.</p>`;
+      if (chk.ok && L.versionLabels(t).length > 1) {
         const nb = new Set(p.questions.map((q) => q.block)).size;
         if (nb > 1) body += `<p class="muted small">Your file has ${nb} groups of questions separated by headings or instructions (${groupRanges(p).join(", ")}). Shuffle keeps each question inside its group.</p>`;
       }
@@ -725,23 +842,91 @@
           : `<p class="good-txt small">The answers marked in the file match your key on all ${n} question${n > 1 ? "s" : ""} ✓</p>`;
       }
       if (p.questions.length) {
-        body += `<details class="help"><summary>Questions found in the file (${p.questions.length})</summary><ol class="tex-list">${p.questions.map((q) => `<li>${q.block !== (p.questions[p.questions.indexOf(q) - 1] || q).block ? `<span class="tex-break"></span>` : ""}${tex.kind === "docx" && q.num !== p.questions.indexOf(q) + 1 ? `<span class="muted">(file ${q.num})</span> ` : ""}${esc(q.preview || "(empty)")}${q.key || q.correctIdx.length ? ` <span class="muted">· answer ${esc(q.key ? q.key.join(q.keyAll ? "+" : "") : q.correctIdx.map((x) => "ABCDEF"[x]).join("+"))}</span>` : ""}${q.choices ? ` <span class="muted">· ${q.choices} choices</span>` : ""}</li>`).join("")}</ol></details>`;
+        body += `<details class="help"><summary>Answer-sheet questions found in the file (${p.questions.length})</summary><ol class="tex-list">${p.questions.map((q, i) => `<li>${i && q.block !== p.questions[i - 1].block ? `<span class="tex-break"></span>` : ""}${q.num !== i + 1 ? `<span class="muted">(file ${q.num})</span> ` : ""}${esc(q.preview || "(empty)")}${q.key || q.correctIdx.length ? ` <span class="muted">· answer ${esc(q.key ? q.key.join(q.keyAll ? "+" : "") : q.correctIdx.map((x) => "ABCDEF"[x]).join("+"))}</span>` : ""}${q.kind ? ` <span class="muted">· ${esc(typeName(q.kind))}</span>` : q.choices ? ` <span class="muted">· ${q.choices} choices</span>` : ""}</li>`).join("")}</ol></details>`;
       }
     }
-    return `
-      <div class="tex-box">
-        <div class="ver-head"><strong>Upload your Word or LaTeX file here</strong></div>
-        <p class="muted small">Upload Version A as a LaTeX (<code>.tex</code>) or Word (<code>.docx</code>) file. For each version you get a new file with the questions in that version's order, and that version's key is set automatically. Answer choices will stay the same.</p>
-        <div class="btn-row">
-          <label class="btn" for="tex-in">${tex ? "Upload a different file…" : "Upload Version A (.tex or .docx)…"}</label>
-          <input type="file" id="tex-in" accept=".tex,.docx,text/x-tex,application/x-tex,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" class="visually-hidden" />
-        </div>
-        ${body}
-        <div class="form-row tex-fixed">
-          <label class="grow">(Optional) Keep these questions in the same position when shuffling
-            <input id="tex-fixed" value="${esc(fixed)}" placeholder="e.g. 12 13 14" inputmode="numeric" /></label>
-        </div>
-      </div>`;
+    el.innerHTML = `
+      <h2>Upload your Word or LaTeX file here</h2>
+      <p class="muted small">Optional. Upload your test (Version A) as a Word (<code>.docx</code>) or LaTeX (<code>.tex</code>) file, and MultiGrader sets up the question format from its multiple-choice questions, leaving out free-response questions. You can still change the format below.
+        With versions, you get a new file for each version with the questions in that version's order, and that version's key is set automatically. Answer choices will stay the same.</p>
+      <div class="btn-row">
+        <label class="btn" for="tex-in">${tex ? "Upload a different file…" : "Upload your test (.docx or .tex)…"}</label>
+        <input type="file" id="tex-in" accept=".tex,.docx,text/x-tex,application/x-tex,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" class="visually-hidden" />
+      </div>
+      ${body}`;
+
+    const texIn = $("#tex-in");
+    texIn.onchange = async () => {
+      const f = texIn.files[0];
+      if (!f) return;
+      if (/\.doc$/i.test(f.name)) {
+        alert("Older Word files (.doc) can't be read. In Word, choose File → Save As → Word Document (.docx), then upload that file. Equations and pictures are kept.");
+        return;
+      }
+      let tex;
+      const head = new Uint8Array(await f.slice(0, 2).arrayBuffer());
+      if (/\.docx$/i.test(f.name) || (head[0] === 0x50 && head[1] === 0x4b)) {
+        try {
+          const doc = await MGDocx.open(await f.arrayBuffer());
+          tex = { kind: "docx", name: f.name, doc, found: MGDocx.findItems(doc) };
+        } catch (e) {
+          alert("Couldn't read that Word file: " + e.message);
+          return;
+        }
+      } else {
+        const text = await f.text();
+        tex = { kind: "tex", name: f.name, text, full: MGLatex.parse(text) };
+      }
+      ui(t).tex = tex;
+      // A new test takes its format from the file; one that already has a
+      // key keeps its format, and the file's questions are matched to it.
+      const auto = canSetFormat(t);
+      tex.sel = guessSel(srcItems(tex), auto ? null : L.questionChoices(t).length);
+      srcParse(tex);
+      if (auto && tex.parsed.questions.length) {
+        const r = applyDetected(t);
+        toast(`Question format set from the file: ${fmtText(r.secs)}.${r.keyed ? ` Answer key filled in for ${r.keyed} question${r.keyed > 1 ? "s" : ""}.` : ""}`);
+      } else {
+        const chk2 = texCheck(t);
+        if (chk2 && chk2.ok) { t.texBlocks = tex.parsed.questions.map((q) => q.block); saveSoon(t); }
+      }
+      refreshAll(t);
+    };
+    const ss = $("#src-sel");
+    if (ss) ss.onchange = () => {
+      const tex = ui(t).tex;
+      const nums = new Set(srcItems(tex).map((it) => it.num));
+      const follow = !formatLocked(t) && (stillFromFile(t, tex) || canSetFormat(t));
+      tex.sel = parseNumRanges(ss.value).filter((n) => nums.has(n));
+      srcParse(tex);
+      if (follow && tex.parsed.questions.length) applyDetected(t);
+      else {
+        const chk2 = texCheck(t);
+        if (chk2 && chk2.ok) { t.texBlocks = tex.parsed.questions.map((q) => q.block); saveSoon(t); }
+      }
+      refreshAll(t);
+    };
+    const ud = $("#use-detected");
+    if (ud) ud.onclick = () => {
+      if (St.flatKey(t).some(Boolean) && !stillFromFile(t, ui(t).tex) && !confirm("Use the question format found in the file? The current format and answer key will be replaced.")) return;
+      const r = applyDetected(t);
+      refreshAll(t);
+      toast(`Question format set from the file: ${fmtText(r.secs)}.${r.keyed ? ` Answer key filled in for ${r.keyed} question${r.keyed > 1 ? "s" : ""}.` : ""}`);
+    };
+    const uk = $("#tex-usekey");
+    if (uk) uk.onclick = () => {
+      const chk2 = texCheck(t);
+      const ranges = sectionRanges(t);
+      chk2.keyFromTex.forEach((k, i) => {
+        if (!k) return;
+        const si = ranges.findIndex((r) => i >= r.start && i <= r.end);
+        const sec = t.sections[si];
+        sec.key = sec.key || [];
+        sec.key[i - ranges[si].start] = k;
+      });
+      saveSoon(t); renderKey(t); renderVersions(t); renderUpload(t);
+      toast("Answer key filled in from the answers marked in the file.");
+    };
   }
 
   function renderVersions(t) {
@@ -758,7 +943,11 @@
         </label>
       </div>
       ${labels.length < 2 ? `<p class="muted small">Same questions, different order. Each sheet gets a VERSION row for students to bubble, each sheet is graded with its version's key, and results and item analysis use Version A's question numbers.</p>` : `
-      ${texPanel(t, labels)}
+      ${ui(t).tex ? "" : `<p class="muted small">To get a reordered copy of your test file for each version, upload it above.</p>`}
+      <div class="form-row tex-fixed">
+        <label class="grow">(Optional) Keep these questions in the same position when shuffling
+          <input id="tex-fixed" value="${esc((t.fixedQuestions || []).join(" "))}" placeholder="e.g. 12 13 14" inputmode="numeric" /></label>
+      </div>
       ${labels.slice(1).map((v) => {
         const vLocked = verLocked(t, v);
         const canUndo = !vLocked && ui(t).undo && ui(t).undo[v] !== undefined;
@@ -786,66 +975,16 @@
         </div>`;
       }).join("")}`}`;
 
-    const texIn = $("#tex-in");
-    if (texIn) texIn.onchange = async () => {
-      const f = texIn.files[0];
-      if (!f) return;
-      if (/\.doc$/i.test(f.name)) {
-        alert("Older Word files (.doc) can't be read. In Word, choose File → Save As → Word Document (.docx), then upload that file. Equations and pictures are kept.");
-        return;
-      }
-      const head = new Uint8Array(await f.slice(0, 2).arrayBuffer());
-      if (/\.docx$/i.test(f.name) || (head[0] === 0x50 && head[1] === 0x4b)) {
-        try {
-          const doc = await MGDocx.open(await f.arrayBuffer());
-          const found = MGDocx.findItems(doc);
-          const sel = MGDocx.guessSelection(found.items, L.questionChoices(t).length);
-          ui(t).tex = { kind: "docx", name: f.name, doc, found, parsed: MGDocx.parse(doc, found, sel) };
-        } catch (e) {
-          alert("Couldn't read that Word file: " + e.message);
-          return;
-        }
-      } else {
-        const text = await f.text();
-        ui(t).tex = { kind: "tex", name: f.name, text, parsed: MGLatex.parse(text) };
-      }
-      const chk = texCheck(t);
-      if (chk && chk.ok) { t.texBlocks = ui(t).tex.parsed.questions.map((q) => q.block); saveSoon(t); }
-      renderVersions(t);
-    };
-    const ds = $("#docx-sel");
-    if (ds) ds.onchange = () => {
-      const tex = ui(t).tex;
-      tex.parsed = MGDocx.parse(tex.doc, tex.found, parseNumRanges(ds.value).filter((n) => tex.found.items.some((it) => it.num === n)));
-      const chk = texCheck(t);
-      if (chk && chk.ok) { t.texBlocks = tex.parsed.questions.map((q) => q.block); saveSoon(t); }
-      renderVersions(t);
-    };
     const fx = $("#tex-fixed");
     if (fx) fx.oninput = () => {
       const n = L.questionChoices(t).length;
       t.fixedQuestions = [...new Set((fx.value.match(/\d+/g) || []).map(Number).filter((x) => x >= 1 && x <= n))];
       saveSoon(t);
     };
-    const uk = $("#tex-usekey");
-    if (uk) uk.onclick = () => {
-      const chk = texCheck(t);
-      const ranges = sectionRanges(t);
-      chk.keyFromTex.forEach((k, i) => {
-        if (!k) return;
-        const si = ranges.findIndex((r) => i >= r.start && i <= r.end);
-        const sec = t.sections[si];
-        sec.key = sec.key || [];
-        sec.key[i - ranges[si].start] = k;
-      });
-      saveSoon(t); renderKey(t); renderVersions(t);
-      toast("Answer key filled in from the answers marked in the file.");
-    };
-
     const vc = $("#v-count");
     vc.onchange = () => {
       t.versionCount = +vc.value;
-      saveSoon(t); updateRanges(t); renderVersions(t); updatePreview(t);
+      saveSoon(t); updateRanges(t); renderVersions(t); renderUpload(t); updatePreview(t);
     };
     $$(".ver-block", el).forEach((blk) => {
       const v = blk.dataset.v;

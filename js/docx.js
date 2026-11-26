@@ -287,6 +287,8 @@
   };
   const ESSAY_RE = /essay|show (?:all |your )*work|free[- ]response|open[- ]response|short answer|long answer|constructed response/i;
   const MC_RE = /multiple[- ]choice|circle (?:the |your )?(?:best |correct )?answers?|choose the|bubble/i;
+  const TF_RE = /\btrue\s*(?:or|\/|-|,)\s*false\b/i;
+  const ASN_RE = /\balways\b[\s\S]{0,40}\bsometimes\b[\s\S]{0,40}\bnever\b/i;
 
   /* All numbered questions in the file, with their extent. */
   function findItems(doc) {
@@ -381,20 +383,49 @@
       it.choices = countChoices(doc, K.slice(it.start, be));
       it.between = K.slice(ce, it.end);
     });
-    // What the text between questions says about the questions after it.
-    let ctx = null;
+    // What the text between questions says about the questions after it:
+    // written answers, multiple choice, true/false or always/sometimes/never.
+    let ctx = null, kind = null;
     const intro = K.slice(0, items.length ? items[0].start : 0);
-    const readCtx = (ks) => { for (const k of ks) { if (ESSAY_RE.test(k.text)) ctx = "essay"; else if (MC_RE.test(k.text)) ctx = "mc"; } };
+    let heading = false; // a multiple-choice heading just before this question
+    const readCtx = (ks) => {
+      heading = false;
+      for (const k of ks) {
+        if (!k.text.trim()) continue;
+        if (ESSAY_RE.test(k.text)) { ctx = "essay"; kind = null; }
+        else if (TF_RE.test(k.text)) { ctx = "mc"; kind = "TF"; heading = true; }
+        else if (ASN_RE.test(k.text)) { ctx = "mc"; kind = "ASN"; heading = true; }
+        else if (MC_RE.test(k.text)) { ctx = "mc"; kind = null; heading = true; }
+      }
+    };
     readCtx(intro);
     items.forEach((it) => {
       it.ctx = ctx;
+      it.mcHeading = heading;
+      // A question's own choices win over its heading.
+      const own = K.slice(it.start, it.bodyEnd).map((k) => k.text).join(" ");
+      it.kind = it.choices >= 2 ? null : TF_RE.test(own) || /(?:^|\s)T\s*\/?\s*F(?:\s|$)/.test(own) ? "TF" : ASN_RE.test(own) ? "ASN" : kind;
       readCtx(it.between);
     });
-    // A picture question is multiple choice if the nearest questions around it are.
+    // Multiple choice: four or more lettered choices, or two or more (or
+    // true/false…) under a multiple-choice heading; two or three choices
+    // between multiple-choice questions; a picture question between them.
     const near = (i, d) => { for (let j = i + d; j >= 0 && j < items.length; j += d) if (!items[j].picNum) return items[j]; return null; };
+    items.forEach((it) => {
+      it.mc = it.ctx !== "essay" && !!(it.choices >= 4 || (it.ctx === "mc" && (it.choices >= 2 || it.kind)));
+    });
     items.forEach((it, i) => {
+      if (it.mc || it.ctx === "essay") return;
       const a = near(i, -1), b = near(i, 1);
-      it.mc = it.ctx !== "essay" && !!(it.choices >= 4 || (it.picNum && (!a || a.choices >= 4) && (!b || b.choices >= 4)));
+      if ((it.picNum || it.choices >= 2) && (!a || a.mc) && (!b || b.mc) && (a || b)) it.mc = true;
+    });
+    // Once a question with no answer choices appears (written answer), later
+    // ones count as multiple choice only after a multiple-choice heading.
+    let free = false;
+    items.forEach((it) => {
+      if (it.mcHeading) free = false;
+      if (free) it.mc = false;
+      if (!it.mc && !it.picNum && it.choices < 2 && !it.kind) free = true;
     });
     return { mode, items };
   }

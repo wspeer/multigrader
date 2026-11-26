@@ -87,16 +87,21 @@ function makeDoc(seed) {
   };
   const nParts = 1 + Math.floor(R() * 3);
   for (let part = 0; part < nParts; part++) {
-    if (part > 0 || chance(0.5)) {
+    // True/false and always/sometimes/never parts need a heading saying so.
+    const pk = pick(["MC", "MC", "MC", "TF", "ASN"]);
+    if (part > 0 || pk !== "MC" || chance(0.5)) {
       if (part > 0) body.push(chance(0.2) ? P("", '<w:sectPr><w:type w:val="nextPage"/></w:sectPr>') : PAGE);
-      body.push(P(runs(pick([`PART ${["ONE", "TWO", "THREE"][part]}: MULTIPLE CHOICE`, "Part " + (part + 1) + ": Multiple choice", "Circle the best answer."])), chance(0.5) ? '<w:jc w:val="center"/>' : ""));
+      const head = pk === "TF" ? pick([`PART ${["ONE", "TWO", "THREE"][part]}: TRUE OR FALSE`, `Part ${part + 1}: True/False`])
+        : pk === "ASN" ? pick([`PART ${["ONE", "TWO", "THREE"][part]}: ALWAYS, SOMETIMES, OR NEVER`, `Part ${part + 1}: Always, Sometimes, or Never`])
+        : pick([`PART ${["ONE", "TWO", "THREE"][part]}: MULTIPLE CHOICE`, "Part " + (part + 1) + ": Multiple choice", "Circle the best answer."]);
+      body.push(P(runs(head), chance(0.5) ? '<w:jc w:val="center"/>' : ""));
       if (chance(0.3)) body.push(`<w:bookmarkStart w:id="${uid}" w:name="sec${uid}"/>`, `<w:bookmarkEnd w:id="${uid++}"/>`);
     }
     const nq = 2 + Math.floor(R() * 6);
     for (let i = 0; i < nq; i++) {
       const token = `Zq${seed}x${num}`;
       // A question that is only a picture, with its number inside it.
-      if (!auto && i > 0 && i < nq - 1 && chance(0.1)) {
+      if (!auto && pk === "MC" && i > 0 && i < nq - 1 && chance(0.1)) {
         if (chance(0.5)) body.push(PAGE);
         body.push(P(inlinePic() + (chance(0.5) ? BR : "")));
         truth.push({ num, mc: true, pic: true, token: null });
@@ -106,12 +111,13 @@ function makeDoc(seed) {
       const out = [];
       openRange(out);
       out.push(stem(num, token, pick(["Which value is a solution?", "Find the slope.", "Evaluate the expression.", "Which graph matches?"])));
-      out.push(...choices(token, 4 + (chance(0.4) ? 1 : 0)));
+      const k = 4 + (chance(0.4) ? 1 : 0);
+      if (pk === "MC") out.push(...choices(token, k));
       for (let b = Math.floor(R() * 5); b > 0; b--) out.push(P());
       closeRange(out);
       if (chance(0.25)) out.push(chance(0.5) ? PAGE : P(runs("\t") + BR));
       body.push(...out);
-      truth.push({ num, mc: true, pic: false, token });
+      truth.push({ num, mc: true, pic: false, token, type: pk === "MC" ? ["", "", "AB", "AC", "AD", "AE"][k] : pk });
       num++;
     }
     // A written part between multiple-choice parts.
@@ -192,6 +198,9 @@ if (require.main === module) (async () => {
     if (got !== want) { fail(seed, `found ${got || "none"}, expected ${want} (${spec.auto ? "auto" : "typed"})`); continue; }
     if (found.items.some((it, i) => !!it.picNum !== spec.truth[i].pic)) { fail(seed, "picture question not recognized"); continue; }
     questions += found.items.length;
+    const typeOf = (it) => it.kind || ["", "", "AB", "AC", "AD", "AE", "AF"][Math.min(6, it.choices)] || "?";
+    const badType = found.items.find((it, i) => spec.truth[i].type && typeOf(it) !== spec.truth[i].type);
+    if (badType) fail(seed, `question ${badType.num} read as ${typeOf(badType)}, expected ${spec.truth[found.items.indexOf(badType)].type}`);
     const mcNums = spec.truth.filter((t) => t.mc).map((t) => t.num);
     const sel = D.guessSelection(found.items, mcNums.length);
     if (sel.join(",") !== mcNums.join(",")) guessMiss++;

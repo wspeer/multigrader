@@ -315,7 +315,9 @@ details.help li { margin: 4px 0; }
 .tex-list { margin: 6px 0 0; padding-left: 26px; font-size: 0.85rem; color: #3a4658; }
 .tex-list li { margin: 2px 0; }
 .tex-fixed { margin: 10px 0 0; }
-.docx-sel { margin: 6px 0; }
+.src-sel { margin: 6px 0; }
+.upload-card .notice { margin: 8px 0; }
+.upload-card .btn-row { margin: 6px 0; }
 .ver-head { flex-wrap: wrap; }
 .ver-head .spacer { flex: 1; }
 .tex-list .tex-break { display: block; border-top: 1px dashed #c5cfdd; margin: 6px 0 4px -26px; }

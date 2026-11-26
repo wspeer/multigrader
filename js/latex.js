@@ -279,5 +279,41 @@
     return { text, count };
   }
 
-  root.MGLatex = { parse, reorder, relabel };
+  /* Which questions look like answer-sheet (multiple-choice) questions, and
+   * their kind: "TF", "ASN" or "YN" from the question macro, its answers, or
+   * a heading such as "True or False" before it; otherwise lettered choices.
+   * Headings such as "Free response" or "Show your work" mark written
+   * questions. If nothing marks any question, all of them count. */
+  const ESSAY_RE = /free[- ]response|short answer|long answer|show (?:all |your )*work (?:below|in the space)|essay|constructed response/i;
+  const MC_RE = /multiple[- ]choice|circle (?:the |your )?(?:best |correct )?answers?|choose the|bubble/i;
+  const TF_RE = /\btrue\s*(?:or|\/|-|,)\s*false\b/i;
+  const ASN_RE = /\balways\b[\s\S]{0,40}\bsometimes\b[\s\S]{0,40}\bnever\b/i;
+  const YN_RE = /\byes\s*(?:or|\/|-|,)\s*no\b/i;
+  function classify(src, parsed) {
+    const qs = parsed.questions || [];
+    let ctx = null, kind = null;
+    const read = (text) => {
+      const t = text.replace(/%.*$/gm, "");
+      if (!t.trim()) return;
+      if (ESSAY_RE.test(t)) { ctx = "essay"; kind = null; }
+      else if (TF_RE.test(t)) { ctx = "mc"; kind = "TF"; }
+      else if (ASN_RE.test(t)) { ctx = "mc"; kind = "ASN"; }
+      else if (YN_RE.test(t)) { ctx = "mc"; kind = "YN"; }
+      else if (MC_RE.test(t)) { ctx = "mc"; kind = null; }
+    };
+    const out = qs.map((q, i) => {
+      read(src.slice(i ? qs[i - 1].bodyEnd : 0, q.start));
+      const macro = q.keyMacro || "";
+      const keys = q.key || [];
+      let k = /^(?:TF|TrueFalse)/i.test(macro) ? "TF" : /ASN|AlwaysSometimesNever/i.test(macro) ? "ASN" : /^(?:YN|YesNo)/i.test(macro) ? "YN" : null;
+      if (!k && !q.choices && keys.length && keys.every((x) => x === "T" || x === "F")) k = "TF";
+      if (!k && !q.choices) k = kind;
+      const marked = !!(q.choices || keys.length || q.correctIdx.length || k);
+      return { kind: k, ctx, marked };
+    });
+    const any = out.some((x) => x.marked);
+    return out.map((x) => ({ kind: x.kind, mc: x.ctx === "essay" ? false : any ? x.marked || x.ctx === "mc" : true }));
+  }
+
+  root.MGLatex = { parse, reorder, relabel, classify };
 })(typeof window !== "undefined" ? window : globalThis);

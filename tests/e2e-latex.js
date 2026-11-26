@@ -43,23 +43,23 @@ function assert(cond, msg) { if (!cond) throw new Error("ASSERT: " + msg); conso
   await page.dispatchEvent(".sec-row[data-i='1'] .sec-count", "change");
   await (await page.$$(".key-quick"))[0].fill("TFT");
   await page.selectOption("#v-count", "3");
-  await page.waitForSelector(".tex-box");
+  await page.waitForSelector("#upload-card");
 
   // wrong file first: count mismatch is explained
   await page.setInputFiles("#tex-in", path.join(__dirname, "fixtures", "enumerate-sample.tex"));
-  await page.waitForSelector(".tex-box .notice.bad");
-  assert(/Found 5 questions in the file, but this test has 7/.test(await page.textContent(".tex-box")), "question-count mismatch explained");
+  await page.waitForSelector("#upload-card .notice.bad");
+  assert(/You've chosen 5 questions from the file for the answer sheet, but this test's format has 7/.test(await page.textContent("#upload-card")), "question-count mismatch explained");
   assert(await page.$eval("[data-texdl]", (b) => b.disabled), "download disabled until the file matches");
 
   await page.setInputFiles("#tex-in", path.join(__dirname, "fixtures", "exam-sample.tex"));
-  await page.waitForFunction(() => /found all 7 questions/.test(document.querySelector(".tex-box").textContent));
+  await page.waitForFunction(() => /found all 7 questions/.test(document.querySelector("#upload-card").textContent));
   assert(true, "exam file: all 7 questions found");
-  const diffTxt = (await page.textContent(".tex-box")).replace(/\s+/g, " ");
+  const diffTxt = (await page.textContent("#upload-card")).replace(/\s+/g, " ");
   assert(/differ from your answer key on 4 questions/.test(diffTxt) && /Q4: file B, your key blank/.test(diffTxt), "\\CorrectChoice answers offered for the unkeyed questions, with details");
   await page.click("#tex-usekey");
   const key = await page.evaluate(() => MGStore.flatKey(MGStore.db.tests[0]));
   assert(key.join("") === "TFTBCAD", "key filled from the file: " + key.join(""));
-  assert(/match your key on all 4/.test(await page.textContent(".tex-box")), "file and key now agree");
+  assert(/match your key on all 4/.test(await page.textContent("#upload-card")), "file and key now agree");
 
   // pin Q7 (the figure question), shuffle B, download
   await page.fill("#tex-fixed", "7");
@@ -130,8 +130,8 @@ function assert(cond, msg) { if (!cond) throw new Error("ASSERT: " + msg); conso
   await qk[1].fill("BACABDAC(AC)");
   await page.selectOption("#v-count", "2");
   await page.setInputFiles("#tex-in", path.join(__dirname, "fixtures", "exam-macros-sample.tex"));
-  await page.waitForFunction(() => /found all 12 questions/.test(document.querySelector(".tex-box").textContent));
-  const t2 = (await page.textContent(".tex-box")).replace(/\s+/g, " ");
+  await page.waitForFunction(() => /found all 12 questions/.test(document.querySelector("#upload-card").textContent));
+  const t2 = (await page.textContent("#upload-card")).replace(/\s+/g, " ");
   assert(/differ from your answer key on 1 question/.test(t2) && /Q12: file A \+ C \(all required\), your key A or C \(either\)/.test(t2), "either-vs-all-required difference is spelled out");
   await page.click("#tex-usekey");
   const k2 = await page.evaluate(() => MGStore.flatKey(MGStore.db.tests[0]));
