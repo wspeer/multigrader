@@ -107,8 +107,10 @@ const MIXED_TEX = String.raw`\documentclass{exam}
   await page.selectOption(".sec-row[data-i='0'] .sec-type", "AE");
   await (await page.$$(".key-quick"))[0].fill("ABCDEABCDE");
   await page.waitForTimeout(200);
+  assert(!!(await page.$("#copy-fmt")), "before an upload: Copy the format of another test is offered");
   await page.setInputFiles("#tex-in", path.join(FIX, "word-typed-sample.docx"));
   await page.waitForSelector("#use-detected");
+  assert(!(await page.$("#copy-fmt")) && !/Copy the format of another test/.test(await page.textContent("main")), "after an upload: Copy the format line is gone");
   assert((await secs()) === "10AE" && (await keyCount()) === 10, "existing format and key untouched by an upload");
 
   // ---- LaTeX: question macros; the file's answers fill the key ----

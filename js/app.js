@@ -326,7 +326,7 @@
         ${[["TF", "T/F"], ["ASN", "A/S/N"], ["AD", "A–D"], ["AE", "A–E"], ["custom", "Custom"]].map(([id, n]) => `<button class="btn small" data-add="${id}">+ ${n}</button>`).join("")}
       </div>`}
       <p id="format-summary" class="muted small"></p>
-      ${!locked && St.db.tests.some((x) => x !== t) ? `<div class="copy-format">
+      ${!locked && !ui(t).tex && St.db.tests.some((x) => x !== t) ? `<div class="copy-format">
         <label>Copy the format of another test
           <select id="copy-fmt"><option value="">Choose a test…</option>${St.db.tests.filter((x) => x !== t).map((x) => `<option value="${x.id}">${esc(ttl(x))} · ${L.questionChoices(x).length} questions${L.versionLabels(x).length > 1 ? `, ${L.versionLabels(x).length} versions` : ""}</option>`).join("")}</select></label>
       </div>` : ""}`;

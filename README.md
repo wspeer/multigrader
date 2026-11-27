@@ -35,7 +35,8 @@ stored in your browser on your device.
 
    A tag on each multi-letter row switches between the two.
 
-   To reuse a layout, **Copy the format of another test** (under the format)
+   To reuse a layout, **Copy the format of another test** (under the format;
+   not shown once a test file is uploaded)
    copies its sections, points and number of versions; the key stays empty.
    **Duplicate** on the Tests page copies a whole test, key included.
 3. **Print.** **⬇ Download PDF** gives one Letter-size page per sheet: one for
