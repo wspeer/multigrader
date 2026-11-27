@@ -116,7 +116,7 @@ const MIXED_TEX = String.raw`\documentclass{exam}
   await page.setInputFiles("#tex-in", path.join(FIX, "exam-macros-sample.tex"));
   await page.waitForFunction(() => /as found in the file/.test(document.querySelector("#upload-card").textContent));
   assert((await secs()) === "3TF,9AD", "macros: 3 × True/False, 9 × A–D");
-  assert((await keyCount()) === 12 && /Answer key filled in for 12 questions/.test(await page.textContent("#toast")), "key filled in from the file");
+  assert((await keyCount()) === 12 && !/key/i.test(await page.textContent("#toast")), "key filled in from the file, without announcing it");
   assert((await page.evaluate(() => MGStore.flatKey(MGStore.db.tests[0])[11])) === "&AC", "all-required answer kept");
 
   // ---- LaTeX: a "True or False" heading, choices, and a free-response part ----

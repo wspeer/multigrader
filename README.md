@@ -93,10 +93,8 @@ your test (Version A) as `.docx` or `.tex`:
   `1–8, 16–22`), and you can change it.
 - For a new test (no key yet), it **sets up the question format**: one bubble
   type per question from its choices (a–d → A–D, True/False, Always/Sometimes/
-  Never), with questions of the same type grouped into a section. If the file
-  marks the answers (LaTeX `\CorrectChoice` or answer macros), the **key is
-  filled in** too. Choosing other questions updates the format while it's
-  still the file's.
+  Never), with questions of the same type grouped into a section. Choosing
+  other questions updates the format while it's still the file's.
 - You can still change the format by hand. The upload card then shows what the
   file suggests, with **Use the format from the file** to go back to it. A test
   that already has a key keeps its format when you upload; the file is matched
@@ -148,11 +146,10 @@ already set, and it's written as a comment at the top of the file.
   without being mixed.
 - **Labels:** a `\label{…}` right after `\question` stays with the position, so
   "problems `\ref{first}` through `\ref{last}`" stays correct.
-- **Answers in the file:** if the file marks answers with `\CorrectChoice`, or
-  with a question macro whose first argument is the answer (`\TFQuestion{F}{…}`,
-  `\MCQuestion{B}{…}`, `\CAQuestion{A, C}{…}`; several letters means all are
-  required), MultiGrader checks them against your key and can fill the key in.
-  With `\printanswers` on, the reordered file prints the new version's key.
+- **Answers in the file** (`\CorrectChoice`, or a question macro whose first
+  argument is the answer, such as `\TFQuestion{F}{…}` or `\CAQuestion{A, C}{…}`)
+  move with their questions. With `\printanswers` on, the reordered file
+  prints the new version's key.
 - "Version A" in the text, and `\newcommand{\version}{A}`, become the new
   version letter. Tip: define `\newcommand{\version}{A}` and put
   `Version \version` in your header.

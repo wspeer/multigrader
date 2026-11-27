@@ -777,6 +777,19 @@
     saveSoon(t);
     return { secs, keyed };
   }
+  // Answers marked in a LaTeX file go into questions whose key is still blank.
+  function fillKeyBlanks(t, chk) {
+    const ranges = sectionRanges(t);
+    let n = 0;
+    chk.keyFromTex.forEach((k, i) => {
+      const si = ranges.findIndex((r) => i >= r.start && i <= r.end);
+      if (!k || si < 0) return;
+      const sec = t.sections[si];
+      sec.key = sec.key || [];
+      if (!sec.key[i - ranges[si].start]) { sec.key[i - ranges[si].start] = k; n++; }
+    });
+    return n;
+  }
   // The format (and key) are still exactly what the file set up.
   const stillFromFile = (t, tex) => tex.appliedSig === formatSig(t.sections) && tex.appliedKey === JSON.stringify(St.flatKey(t));
   const canSetFormat = (t) => !formatLocked(t) && !St.flatKey(t).some(Boolean) && !(t.versionOrders && Object.keys(t.versionOrders).length);
@@ -827,20 +840,6 @@
         if (nb > 1) body += `<p class="muted small">Your file has ${nb} groups of questions separated by headings or instructions (${groupRanges(p).join(", ")}). Shuffle keeps each question inside its group.</p>`;
       }
       if (chk.ok && chk.warnings.length) body += `<div class="notice small">${chk.warnings.slice(0, 4).map(esc).join("<br>")}${chk.warnings.length > 4 ? `<br>…and ${chk.warnings.length - 4} more` : ""}</div>`;
-      if (chk.ok && chk.keyFromTex.some(Boolean)) {
-        const n = chk.keyFromTex.filter(Boolean).length;
-        const describe = (k) => {
-          if (!k) return "blank";
-          const { letters, all } = St.keyInfo(k);
-          return letters.length < 2 ? letters : `${St.keyText(k)} (${all ? "all required" : "either"})`;
-        };
-        const diffList = chk.keyDiffs.slice(0, 8).map((i) => `<li>Q${i + 1}: file <strong>${esc(describe(chk.keyFromTex[i]))}</strong>, your key <strong>${esc(describe(fk[i]))}</strong></li>`).join("") +
-          (chk.keyDiffs.length > 8 ? `<li>…and ${chk.keyDiffs.length - 8} more</li>` : "");
-        body += chk.keyDiffs.length
-          ? `<div class="notice small">The file marks the answers to ${n} question${n > 1 ? "s" : ""}. ${chk.keyDiffs.length === n && fk.every((k) => !k) ? "Your answer key is empty." : `They differ from your answer key on ${chk.keyDiffs.length} question${chk.keyDiffs.length > 1 ? "s" : ""}:<ul class="diff-list">${diffList}</ul>`}
-              <button class="btn small primary" id="tex-usekey">Use the file's answers</button></div>`
-          : `<p class="good-txt small">The answers marked in the file match your key on all ${n} question${n > 1 ? "s" : ""} ✓</p>`;
-      }
       if (p.questions.length) {
         body += `<details class="help"><summary>Answer-sheet questions found in the file (${p.questions.length})</summary><ol class="tex-list">${p.questions.map((q, i) => `<li>${i && q.block !== p.questions[i - 1].block ? `<span class="tex-break"></span>` : ""}${q.num !== i + 1 ? `<span class="muted">(file ${q.num})</span> ` : ""}${esc(q.preview || "(empty)")}${q.key || q.correctIdx.length ? ` <span class="muted">· answer ${esc(q.key ? q.key.join(q.keyAll ? "+" : "") : q.correctIdx.map((x) => "ABCDEF"[x]).join("+"))}</span>` : ""}${q.kind ? ` <span class="muted">· ${esc(typeName(q.kind))}</span>` : q.choices ? ` <span class="muted">· ${q.choices} choices</span>` : ""}</li>`).join("")}</ol></details>`;
       }
@@ -884,10 +883,10 @@
       srcParse(tex);
       if (auto && tex.parsed.questions.length) {
         const r = applyDetected(t);
-        toast(`Question format set from the file: ${fmtText(r.secs)}.${r.keyed ? ` Answer key filled in for ${r.keyed} question${r.keyed > 1 ? "s" : ""}.` : ""}`);
+        toast(`Question format set from the file: ${fmtText(r.secs)}.`);
       } else {
         const chk2 = texCheck(t);
-        if (chk2 && chk2.ok) { t.texBlocks = tex.parsed.questions.map((q) => q.block); saveSoon(t); }
+        if (chk2 && chk2.ok) { t.texBlocks = tex.parsed.questions.map((q) => q.block); fillKeyBlanks(t, chk2); saveSoon(t); }
       }
       refreshAll(t);
     };
@@ -901,7 +900,7 @@
       if (follow && tex.parsed.questions.length) applyDetected(t);
       else {
         const chk2 = texCheck(t);
-        if (chk2 && chk2.ok) { t.texBlocks = tex.parsed.questions.map((q) => q.block); saveSoon(t); }
+        if (chk2 && chk2.ok) { t.texBlocks = tex.parsed.questions.map((q) => q.block); fillKeyBlanks(t, chk2); saveSoon(t); }
       }
       refreshAll(t);
     };
@@ -910,21 +909,7 @@
       if (St.flatKey(t).some(Boolean) && !stillFromFile(t, ui(t).tex) && !confirm("Use the question format found in the file? The current format and answer key will be replaced.")) return;
       const r = applyDetected(t);
       refreshAll(t);
-      toast(`Question format set from the file: ${fmtText(r.secs)}.${r.keyed ? ` Answer key filled in for ${r.keyed} question${r.keyed > 1 ? "s" : ""}.` : ""}`);
-    };
-    const uk = $("#tex-usekey");
-    if (uk) uk.onclick = () => {
-      const chk2 = texCheck(t);
-      const ranges = sectionRanges(t);
-      chk2.keyFromTex.forEach((k, i) => {
-        if (!k) return;
-        const si = ranges.findIndex((r) => i >= r.start && i <= r.end);
-        const sec = t.sections[si];
-        sec.key = sec.key || [];
-        sec.key[i - ranges[si].start] = k;
-      });
-      saveSoon(t); renderKey(t); renderVersions(t); renderUpload(t);
-      toast("Answer key filled in from the answers marked in the file.");
+      toast(`Question format set from the file: ${fmtText(r.secs)}.`);
     };
   }
 

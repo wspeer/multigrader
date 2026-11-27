@@ -54,12 +54,10 @@ function assert(cond, msg) { if (!cond) throw new Error("ASSERT: " + msg); conso
   await page.setInputFiles("#tex-in", path.join(__dirname, "fixtures", "exam-sample.tex"));
   await page.waitForFunction(() => /found all 7 questions/.test(document.querySelector("#upload-card").textContent));
   assert(true, "exam file: all 7 questions found");
-  const diffTxt = (await page.textContent("#upload-card")).replace(/\s+/g, " ");
-  assert(/differ from your answer key on 4 questions/.test(diffTxt) && /Q4: file B, your key blank/.test(diffTxt), "\\CorrectChoice answers offered for the unkeyed questions, with details");
-  await page.click("#tex-usekey");
   const key = await page.evaluate(() => MGStore.flatKey(MGStore.db.tests[0]));
-  assert(key.join("") === "TFTBCAD", "key filled from the file: " + key.join(""));
-  assert(/match your key on all 4/.test(await page.textContent("#upload-card")), "file and key now agree");
+  assert(key.join("") === "TFTBCAD", "blank key entries filled quietly from \\CorrectChoice: " + key.join(""));
+  const upTxt = (await page.textContent("#upload-card")).replace(/\s+/g, " ");
+  assert(!/answers marked|differ from your answer key|match your key/i.test(upTxt) && !(await page.$("#tex-usekey")), "nothing about it in the upload card");
 
   // pin Q7 (the figure question), shuffle B, download
   await page.fill("#tex-fixed", "7");
@@ -127,15 +125,16 @@ function assert(cond, msg) { if (!cond) throw new Error("ASSERT: " + msg); conso
   await page.dispatchEvent(".sec-row[data-i='1'] .sec-count", "change");
   const qk = await page.$$(".key-quick");
   await qk[0].fill("TFF");
-  await qk[1].fill("BACABDAC(AC)");
+  await qk[1].fill("BACABDAD");
   await page.selectOption("#v-count", "2");
   await page.setInputFiles("#tex-in", path.join(__dirname, "fixtures", "exam-macros-sample.tex"));
   await page.waitForFunction(() => /found all 12 questions/.test(document.querySelector("#upload-card").textContent));
-  const t2 = (await page.textContent("#upload-card")).replace(/\s+/g, " ");
-  assert(/differ from your answer key on 1 question/.test(t2) && /Q12: file A \+ C \(all required\), your key A or C \(either\)/.test(t2), "either-vs-all-required difference is spelled out");
-  await page.click("#tex-usekey");
   const k2 = await page.evaluate(() => MGStore.flatKey(MGStore.db.tests[0]));
-  assert(k2[11] === "&AC", "using the file's answers makes Q12 all-required");
+  assert(k2[10] === "D", "an answer already in the key is kept (Q11 stays D; the file says C)");
+  assert(k2[11] === "&AC", "a blank answer is filled from the file (Q12: A and C, all required)");
+  await (await page.$$(".key-quick"))[1].fill("BACABDADB");
+  await page.waitForTimeout(200);
+  assert((await page.evaluate(() => MGStore.flatKey(MGStore.db.tests[0])[11])) === "B", "the filled-in answer can be changed");
 
   assert(errors.length === 0, "no page errors" + (errors.length ? ": " + errors.join(" | ") : ""));
   await browser.close();
