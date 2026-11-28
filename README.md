@@ -19,8 +19,9 @@ stored in your browser on your device.
    Screenshots are read in the browser with the bundled Tesseract OCR engine
    (`vendor/tesseract`). Nothing is uploaded, but it can drop accents
    (Román → Roman), so check the preview.
-2. **Build.** Create a test. If you have it as a Word (`.docx`) or LaTeX
-   (`.tex`) file, upload it under **Upload your Word or LaTeX file here**:
+2. **Build.** Create a test. If you have it as a Word (`.docx`), LaTeX
+   (`.tex`) or PDF file, upload it under **Upload your Word, LaTeX or PDF file
+   here**:
    MultiGrader sets up the question format from its multiple-choice questions
    (see [Setting up from your test file](#setting-up-from-your-test-file)).
    Or list the sections yourself, for example *5 × True/False,
@@ -83,8 +84,8 @@ stored in your browser on your device.
 
 ### Setting up from your test file
 
-On the Build tab, under Details, **Upload your Word or LaTeX file here** takes
-your test (Version A) as `.docx` or `.tex`:
+On the Build tab, under Details, **Upload your Word, LaTeX or PDF file here**
+takes your test (Version A) as `.docx`, `.tex` or `.pdf`:
 
 - MultiGrader picks out the **multiple-choice questions** and leaves out
   free-response ones. It uses answer choices, question macros
@@ -102,6 +103,13 @@ your test (Version A) as `.docx` or `.tex`:
   to it instead.
 - Where a file doesn't write out the choices (a LaTeX macro with the answer
   only), enough letters for the answers are used, at least A–D.
+- **PDF:** the text is read with the bundled pdf.js (`vendor/pdfjs`), one
+  column at a time on two-column pages, without page headers and footers.
+  Larger pictures count as lines of their own, so a screenshot question with
+  its number inside is still found. A scanned PDF (no text) is read with the
+  bundled text recognition, which is slower and less exact, so check the list.
+  A PDF can't be rearranged, so it sets up the format only; reordered copies
+  for versions need the Word or LaTeX file.
 
 ### Versions
 
@@ -129,7 +137,7 @@ you can check it against your printed test.
 
 #### Making the versions from your LaTeX file
 
-Upload Version A under **Upload your Word or LaTeX file here** (Build tab). MultiGrader finds the
+Upload Version A under **Upload your Word, LaTeX or PDF file here** (Build tab). MultiGrader finds the
 questions: `\question` (also `\titledquestion` and `\bonusquestion`) inside
 `questions` in the exam class, or `\item` in top-level numbered `enumerate`
 lists, which may be spread over several lists. Click **Shuffle**, then
@@ -273,6 +281,8 @@ js/scanner.js     image → answers
 js/store.js       localStorage / IndexedDB data, grading, backup merge
 js/latex.js       find and reorder questions in a LaTeX file
 js/docx.js        find and reorder questions in a Word .docx file (zip + XML, no libraries)
+js/pdfread.js     read a test PDF into lines (bundled pdf.js; OCR for scans) for the question finder
+vendor/pdfjs/     PDF.js 3.11.174 (Apache-2.0), loaded only when a PDF is uploaded
 js/pdf.js         answer sheets as a PDF (vector, built-in Helvetica, no libraries)
 js/roster.js      pasted / recognized roster text → names (+ optional Form)
 js/ocr.js         read a roster screenshot (bundled Tesseract, loaded on demand)
@@ -291,7 +301,8 @@ node tests/e2e-versions.js        # versions, either / all-required keys, missin
 node tests/latex-test.js          # finding and reordering questions in .tex files
 node tests/e2e-latex.js           # upload .tex → key from \CorrectChoice → shuffle → download
 node tests/e2e-docx.js            # upload .docx → answer-sheet questions → shuffle → download
-node tests/e2e-upload.js          # upload sets up the question format (Word and LaTeX), free response left out
+node tests/e2e-upload.js          # upload sets up the question format (Word, LaTeX, PDF, scanned PDF)
+node tests/pdf-read-test.js       # 120 random test PDFs (one/two columns, parts, pictures) read back correctly
 node tests/docx-stress-test.js    # 300 random Word tests × structures; shuffled files complete and correct
 node tests/pdf-test.js            # PDF download: page size, text, every page scans (needs poppler-utils)
 node tests/roster-test.js         # roster text formats (CSV/spreadsheet/OCR lines, Form)

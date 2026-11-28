@@ -108,5 +108,23 @@
     return lines.map((words) => words.map((wd) => fixWord(wd.text)).join(" ")).join("\n");
   }
 
-  root.MGOcr = { readText };
+  /**
+   * Read a page image (a canvas) into lines of text with their boxes, in
+   * reading order. Used for scanned PDFs.
+   */
+  async function readLines(canvas, onProgress) {
+    progressCb = (m) => {
+      if (!onProgress) return;
+      onProgress(m.status === "recognizing text" ? "Reading…" : "Loading text recognition (first time only)…", m.progress || 0);
+    };
+    const w = await getWorker();
+    await w.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: "3" });
+    const { data } = await w.recognize(canvas, {}, { blocks: true, text: true });
+    progressCb = null;
+    const out = [];
+    for (const b of data.blocks || []) for (const p of b.paragraphs || []) for (const l of p.lines || []) out.push({ text: (l.words || []).map((wd) => wd.text).join(" "), bbox: l.bbox });
+    return out;
+  }
+
+  root.MGOcr = { readText, readLines };
 })(window);

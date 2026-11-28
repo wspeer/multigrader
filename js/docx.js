@@ -436,7 +436,9 @@
     const seen = new Set();
     const lists = {};
     for (const k of ks) {
-      for (const m of k.text.matchAll(/(?:^|\s)\(?([a-fA-F])[).](?=\s|$)/g)) seen.add(m[1].toLowerCase());
+      // "a)" and "(a)" may run straight into an equation (no space after, as in
+      // some PDFs); "a." needs a space after it.
+      for (const m of k.text.matchAll(/(?:^|\s)(?:\(([a-fA-F])\)|([a-fA-F])\)|([a-fA-F])\.(?=\s|$))/g)) seen.add((m[1] || m[2] || m[3]).toLowerCase());
       if (k.numId && /letter/i.test(doc.fmt(k.numId, k.ilvl) || "")) lists[k.numId + "/" + k.ilvl] = (lists[k.numId + "/" + k.ilvl] || 0) + 1;
     }
     let n = 0;

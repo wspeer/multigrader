@@ -684,7 +684,7 @@
   // Every numbered question in the file, with whether it looks like an
   // answer-sheet question and its kind (TF / ASN / YN, or lettered choices).
   function srcItems(tex) {
-    if (tex.kind === "docx") return tex.found.items;
+    if (tex.kind === "docx" || tex.kind === "pdf") return tex.found.items;
     const p = tex.full;
     if (p.error) return [];
     const cls = MGLatex.classify(tex.text, p);
@@ -692,7 +692,7 @@
   }
   // The answer-sheet questions chosen (file numbers), as questions with groups.
   function srcParse(tex) {
-    if (tex.kind === "docx") { tex.parsed = MGDocx.parse(tex.doc, tex.found, tex.sel); return; }
+    if (tex.kind === "docx" || tex.kind === "pdf") { tex.parsed = MGDocx.parse(tex.doc, tex.found, tex.sel); return; }
     const p = tex.full;
     if (p.error) { tex.parsed = { mode: p.mode, items: [], questions: [], error: p.error }; return; }
     const items = srcItems(tex);
@@ -806,8 +806,9 @@
     if (tex) {
       const p = tex.parsed;
       const items = p.items || [];
-      const how = { exam: "exam class \\question", enumerate: "numbered list \\item", auto: "Word's automatic numbering", typed: "typed question numbers" }[p.mode] || "";
-      if (!items.length) body += `<div class="notice bad small"><strong>${esc(tex.name)}</strong>: ${esc(p.error || "No questions found.")}</div>`;
+      const how = tex.kind === "pdf" ? (tex.ocr ? "read from the page images with text recognition; check the list" : "question numbers in the PDF")
+        : { exam: "exam class \\question", enumerate: "numbered list \\item", auto: "Word's automatic numbering", typed: "typed question numbers" }[p.mode] || "";
+      if (!items.length) body += `<div class="notice bad small"><strong>${esc(tex.name)}</strong>: ${esc(tex.kind === "pdf" ? (tex.hasText ? "No numbered questions found in the PDF. MultiGrader looks for questions numbered 1. 2. 3. at the start of a line." : "No text could be read from this PDF.") : p.error || "No questions found.")}</div>`;
       else {
         const sel = p.questions.map((q) => q.num);
         const free = items.length - sel.length;
@@ -840,16 +841,17 @@
         if (nb > 1) body += `<p class="muted small">Your file has ${nb} groups of questions separated by headings or instructions (${groupRanges(p).join(", ")}). Shuffle keeps each question inside its group.</p>`;
       }
       if (chk.ok && chk.warnings.length) body += `<div class="notice small">${chk.warnings.slice(0, 4).map(esc).join("<br>")}${chk.warnings.length > 4 ? `<br>…and ${chk.warnings.length - 4} more` : ""}</div>`;
+      if (tex.kind === "pdf" && L.versionLabels(t).length > 1 && items.length) body += `<p class="muted small">A PDF can't be rearranged, so MultiGrader can't make reordered copies of it. Upload the Word or LaTeX file to get one for each version.</p>`;
       if (p.questions.length) {
         body += `<details class="help"><summary>Answer-sheet questions found in the file (${p.questions.length})</summary><ol class="tex-list">${p.questions.map((q, i) => `<li>${i && q.block !== p.questions[i - 1].block ? `<span class="tex-break"></span>` : ""}${q.num !== i + 1 ? `<span class="muted">(file ${q.num})</span> ` : ""}${esc(q.preview || "(empty)")}${q.key || q.correctIdx.length ? ` <span class="muted">· answer ${esc(q.key ? q.key.join(q.keyAll ? "+" : "") : q.correctIdx.map((x) => "ABCDEF"[x]).join("+"))}</span>` : ""}${q.kind ? ` <span class="muted">· ${esc(typeName(q.kind))}</span>` : q.choices ? ` <span class="muted">· ${q.choices} choices</span>` : ""}</li>`).join("")}</ol></details>`;
       }
     }
     el.innerHTML = `
-      <h2>Upload your Word or LaTeX file here</h2>
-      <p class="muted small">Optional. Upload your test (Version A) as a Word (<code>.docx</code>) or LaTeX (<code>.tex</code>) file, and MultiGrader sets up the question format from its multiple-choice questions (leaving out free-response questions). You can still modify the format below. Scroll down past Answer Key to generate new versions with questions in a different order.</p>
+      <h2>Upload your Word, LaTeX or PDF file here</h2>
+      <p class="muted small">Optional. Upload your test (Version A) as a Word (<code>.docx</code>), LaTeX (<code>.tex</code>) or PDF file, and MultiGrader sets up the question format from its multiple-choice questions (leaving out free-response questions). You can still modify the format below. Scroll down past Answer Key to generate new versions with questions in a different order.</p>
       <div class="btn-row">
-        <label class="btn" for="tex-in">${tex ? "Upload a different file…" : "Upload your test (.docx or .tex)…"}</label>
-        <input type="file" id="tex-in" accept=".tex,.docx,text/x-tex,application/x-tex,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" class="visually-hidden" />
+        <label class="btn" for="tex-in">${tex ? "Upload a different file…" : "Upload your test (.docx, .tex or .pdf)…"}</label>
+        <input type="file" id="tex-in" accept=".tex,.docx,.pdf,text/x-tex,application/x-tex,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" class="visually-hidden" />
       </div>
       ${body}`;
 
@@ -862,8 +864,21 @@
         return;
       }
       let tex;
-      const head = new Uint8Array(await f.slice(0, 2).arrayBuffer());
-      if (/\.docx$/i.test(f.name) || (head[0] === 0x50 && head[1] === 0x4b)) {
+      const head = new Uint8Array(await f.slice(0, 4).arrayBuffer());
+      if (/\.pdf$/i.test(f.name) || String.fromCharCode(...head) === "%PDF") {
+        const status = document.createElement("p");
+        status.className = "muted small pdf-status";
+        status.textContent = "Reading the PDF…";
+        $(".btn-row", el).after(status);
+        try {
+          const o = await MGPdfRead.open(await f.arrayBuffer(), (label, frac) => { status.textContent = `${label}${frac ? ` ${Math.round(frac * 100)}%` : ""}`; });
+          tex = { kind: "pdf", name: f.name, doc: o.doc, found: MGDocx.findItems(o.doc), ocr: o.ocr, hasText: o.hasText };
+        } catch (e) {
+          status.remove();
+          alert("Couldn't read that PDF: " + e.message);
+          return;
+        }
+      } else if (/\.docx$/i.test(f.name) || (head[0] === 0x50 && head[1] === 0x4b)) {
         try {
           const doc = await MGDocx.open(await f.arrayBuffer());
           tex = { kind: "docx", name: f.name, doc, found: MGDocx.findItems(doc) };
@@ -927,7 +942,7 @@
         </label>
       </div>
       ${labels.length < 2 ? `<p class="muted small">Same questions, different order. Each sheet gets a VERSION row for students to bubble, each sheet is graded with its version's key, and results and item analysis use Version A's question numbers.</p>` : `
-      ${ui(t).tex ? "" : `<p class="muted small">To get a reordered copy of your test file for each version, upload it above.</p>`}
+      ${ui(t).tex && ui(t).tex.kind !== "pdf" ? "" : `<p class="muted small">To get a reordered copy of your test file for each version, upload the Word or LaTeX file above.</p>`}
       <div class="form-row tex-fixed">
         <label class="grow">(Optional) Keep these questions in the same position when shuffling
           <input id="tex-fixed" value="${esc((t.fixedQuestions || []).join(" "))}" placeholder="e.g. 12 13 14" inputmode="numeric" /></label>
@@ -945,7 +960,7 @@
                  ${canUndo ? `<button class="btn small ghost" data-undo title="Go back to the order before the last change">↶ Undo</button>` : ""}
                  <button class="btn small ghost" data-same>Same as A</button>
                  <button class="btn small" data-lock title="Keep this order: Shuffle and editing are turned off until you unlock">Lock order</button>`}
-            ${ui(t).tex ? `<span class="spacer"></span><button class="btn small primary" data-texdl ${texCheck(t).ok ? "" : "disabled"}>⬇ Version ${v} ${ui(t).tex.kind === "docx" ? ".docx" : ".tex"}</button>` : ""}</div>
+            ${ui(t).tex && ui(t).tex.kind !== "pdf" ? `<span class="spacer"></span><button class="btn small primary" data-texdl ${texCheck(t).ok ? "" : "disabled"}>⬇ Version ${v} ${ui(t).tex.kind === "docx" ? ".docx" : ".tex"}</button>` : ""}</div>
           ${t.sections.map((s, si) => {
             const r = ranges[si];
             if (!r.n) return "";

@@ -44,6 +44,46 @@ const MIXED_TEX = String.raw`\documentclass{exam}
 \end{document}
 `;
 
+
+// Runs in the page: a small test as a PDF (MultiGrader's PDF writer), or as a
+// scan of that PDF (page images only, no text).
+async function makeTestPdf(scan) {
+  const lines = [
+    ["Part 1: True or False", 1], ["1.  A square is a rectangle.", 0], ["2.  Every rhombus is a square.", 0],
+    ["Part 2: Multiple choice", 1], ["3.  What is 2 + 2?", 0], ["a) 3", 2], ["b) 4", 2], ["c) 5", 2], ["d) 6", 2],
+    ["4.  What is 3 x 3?", 0], ["a) 6", 2], ["b) 9", 2], ["c) 12", 2], ["d) 15", 2],
+    ["5.  What is 10 - 4?", 0], ["a) 4", 2], ["b) 5", 2], ["c) 6", 2], ["d) 7", 2],
+    ["Part 3: Free response. Show all work.", 1], ["6.  Prove that the angles of a triangle add to 180 degrees.", 0],
+    ["Part 4: Multiple choice", 1], ["7.  Which is prime?", 0], ["a) 4    b) 6    c) 7    d) 8    e) 9", 2],
+    ["8.  Which is even?", 0], ["a) 1    b) 3    c) 5    d) 8    e) 9", 2],
+  ];
+  const ops = [];
+  let y = 24;
+  ops.push({ t: "text", x: 18, y: 14, size: 4.5, text: "Unit Quiz - Version A", bold: true });
+  for (const [text, kind] of lines) {
+    if (kind === 1) y += 4;
+    ops.push({ t: "text", x: kind === 2 ? 26 : 18, y, size: 4.2, text, bold: kind === 1 });
+    y += kind === 0 && /^6\./.test(text) ? 30 : 7.5;
+  }
+  let blob = await MGPdf.sheetsToPDF([ops], { title: "quiz" });
+  if (scan) {
+    // Draw the page and keep only the picture, as a scanner would.
+    const L = await (async () => { if (!window.pdfjsLib) await MGPdfRead.readLines(await blob.arrayBuffer()); return window.pdfjsLib; })();
+    const pdf = await L.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
+    const page = await pdf.getPage(1);
+    const vp = page.getViewport({ scale: 3 });
+    const c = document.createElement("canvas"); c.width = vp.width; c.height = vp.height;
+    const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    const jpeg = new Uint8Array(await (await new Promise((r) => c.toBlob(r, "image/jpeg", 0.9))).arrayBuffer());
+    blob = await MGPdf.sheetsToPDF([[{ t: "image", x: 0, y: 0, w: 215.9, h: 279.4, jpeg }]], { title: "scan" });
+  }
+  const b = new Uint8Array(await blob.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode(...b.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
 (async () => {
   const srv = await serve();
   const base = `http://localhost:${srv.address().port}`;
@@ -134,6 +174,28 @@ const MIXED_TEX = String.raw`\documentclass{exam}
   await page.selectOption("#v-count", "2");
   await page.waitForSelector(".ver-block[data-v='B'] [data-texdl]:not([disabled])");
   assert(/\.tex/.test(await page.textContent(".ver-block[data-v='B'] [data-texdl]")) && !!(await page.$("#tex-fixed")), "Versions card: download button and keep-in-place box");
+
+
+  // ---- PDF: the question format from a PDF's text ----
+  await page.evaluate(`window.__makeTestPdf = ${makeTestPdf.toString()}`);
+  const pdfB64 = await page.evaluate(() => window.__makeTestPdf(false));
+  await newTest();
+  assert(/Upload your Word, LaTeX or PDF file here/.test(await card()), "upload card mentions PDF");
+  await page.setInputFiles("#tex-in", { name: "quiz.pdf", mimeType: "application/pdf", buffer: Buffer.from(pdfB64, "base64") });
+  await page.waitForFunction(() => /as found in the file/.test(document.querySelector("#upload-card").textContent), null, { timeout: 60000 });
+  assert((await secs()) === "2TF,3AD,2AE", "PDF: 2 × True/False, 3 × A–D, 2 × A–E");
+  assert((await page.inputValue("#src-sel")) === "1–5, 7–8", "PDF: the free-response question (6) is left out");
+  await page.selectOption("#v-count", "2");
+  await page.waitForSelector(".ver-block[data-v='B']");
+  assert(!(await page.$("[data-texdl]")) && /can't make reordered copies of it/.test(await card()), "PDF: no reordered download; the card says to upload the Word or LaTeX file");
+
+  // ---- a scanned PDF (no text) is read with OCR ----
+  const scanB64 = await page.evaluate(() => window.__makeTestPdf(true));
+  await newTest();
+  await page.setInputFiles("#tex-in", { name: "scan.pdf", mimeType: "application/pdf", buffer: Buffer.from(scanB64, "base64") });
+  await page.waitForFunction(() => /as found in the file|found all|No numbered/.test(document.querySelector("#upload-card").textContent), null, { timeout: 180000 });
+  assert(/text recognition/.test(await card()), "scan: read with text recognition (and says so)");
+  assert((await secs()) === "2TF,3AD,2AE", "scan: same format found: " + (await secs()));
 
   assert(errors.length === 0, "no page errors" + (errors.length ? ": " + errors.join(" | ") : ""));
   await browser.close();
