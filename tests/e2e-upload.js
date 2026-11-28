@@ -174,6 +174,27 @@ async function makeTestPdf(scan, keyed) {
   assert((await page.evaluate(() => MGStore.flatKey(MGStore.db.tests[0]).join(","))) === ",,B,A,D", "\\CorrectChoice answers filled in");
   assert(/Numbering on the answer sheet: Q1–4 = file 1–4, Q5 = file 6/.test(await card()), "file and answer-sheet numbering shown");
 
+  // ---- LaTeX: answer-only macros, choices listed once in each part's instructions ----
+  const PARTS_TEX = String.raw`\documentclass{exam}
+\newcommand\MCQuestion[2]{#2}
+\begin{document}
+\begin{questions}
+\fullwidth{\textbf{Part I.} For each quantity, bubble \textbf{(A)} if it is positive, \textbf{(B)} if it is negative, or \textbf{(C)} if it is zero.}
+\question\MCQuestion{B}{$f_x(R)$}
+\question\MCQuestion{A}{$f_y(T)$}
+\question\MCQuestion{B}{$f_x(P)$}
+\fullwidth{\textbf{Part II.} Five arrows labeled \textbf{A}--\textbf{E} start at the point $Z$. Which arrow points in}
+\question\MCQuestion{D}{the direction of $\nabla g(Z)$}
+\question\MCQuestion{A}{a direction with $D_u g(Z)=0$}
+\end{questions}
+\end{document}
+`;
+  await newTest();
+  await page.setInputFiles("#tex-in", { name: "parts.tex", mimeType: "text/x-tex", buffer: Buffer.from(PARTS_TEX) });
+  await page.waitForFunction(() => /as found in the file/.test(document.querySelector("#upload-card").textContent));
+  assert((await secs()) === "3AC,2AE", "parts keep their own letters from their instructions: 3 × A–C, 2 × A–E (not A–D)");
+  assert((await page.evaluate(() => MGStore.flatKey(MGStore.db.tests[0]).join(""))) === "BABDA", "and the key comes from the macros");
+
   // ---- versions: download still works from the Versions card ----
   await page.selectOption("#v-count", "2");
   await page.waitForSelector(".ver-block[data-v='B'] [data-texdl]:not([disabled])");

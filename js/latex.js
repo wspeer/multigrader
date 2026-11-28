@@ -289,12 +289,29 @@
   const TF_RE = /\btrue\s*(?:or|\/|-|,)\s*false\b/i;
   const ASN_RE = /\balways\b[\s\S]{0,40}\bsometimes\b[\s\S]{0,40}\bnever\b/i;
   const YN_RE = /\byes\s*(?:or|\/|-|,)\s*no\b/i;
+  // The answer letters a part's instructions list: "(A) … (B) … (C)" or
+  // "labeled A–E". Returns how many (A–C → 3), or 0.
+  function instructionLetters(t) {
+    const plain = t.replace(/\\(?:textbf|textit|emph|textsf|mathbf|mathrm|text)\s*\{([^{}]*)\}/g, "$1").replace(/[{}$]/g, "");
+    let n = 0;
+    const listed = [...plain.matchAll(/\(([A-F])\)/g)].map((m) => m[1]);
+    if (listed.length >= 2 && listed.includes("A")) n = Math.max(...listed.map((x) => "ABCDEF".indexOf(x) + 1));
+    const range = plain.match(/\b[Aa]\s*(?:--|–|—|-|through|to)\s*([B-F])\b/);
+    if (range) n = Math.max(n, "ABCDEF".indexOf(range[1]) + 1);
+    return n >= 2 ? n : 0;
+  }
+
   function classify(src, parsed) {
     const qs = parsed.questions || [];
-    let ctx = null, kind = null;
+    let ctx = null, kind = null, letters = 0;
     const read = (text) => {
       const t = text.replace(/%.*$/gm, "");
       if (!t.trim()) return;
+      // The letters instructions list apply until instructions list others,
+      // or a part of another kind (written, true/false…) starts.
+      const n = instructionLetters(t);
+      if (n) letters = n;
+      else if (ESSAY_RE.test(t) || TF_RE.test(t) || ASN_RE.test(t) || YN_RE.test(t)) letters = 0;
       if (ESSAY_RE.test(t)) { ctx = "essay"; kind = null; }
       else if (TF_RE.test(t)) { ctx = "mc"; kind = "TF"; }
       else if (ASN_RE.test(t)) { ctx = "mc"; kind = "ASN"; }
@@ -309,10 +326,10 @@
       if (!k && !q.choices && keys.length && keys.every((x) => x === "T" || x === "F")) k = "TF";
       if (!k && !q.choices) k = kind;
       const marked = !!(q.choices || keys.length || q.correctIdx.length || k);
-      return { kind: k, ctx, marked };
+      return { kind: k, ctx, marked, letters: k ? 0 : letters };
     });
     const any = out.some((x) => x.marked);
-    return out.map((x) => ({ kind: x.kind, mc: x.ctx === "essay" ? false : any ? x.marked || x.ctx === "mc" : true }));
+    return out.map((x) => ({ kind: x.kind, letters: x.letters, mc: x.ctx === "essay" ? false : any ? x.marked || x.ctx === "mc" : true }));
   }
 
   root.MGLatex = { parse, reorder, relabel, classify };

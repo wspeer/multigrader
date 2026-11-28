@@ -688,7 +688,7 @@
     const p = tex.full;
     if (p.error) return [];
     const cls = MGLatex.classify(tex.text, p);
-    return p.questions.map((q, i) => ({ ...q, num: i + 1, mc: cls[i].mc, kind: cls[i].kind }));
+    return p.questions.map((q, i) => ({ ...q, num: i + 1, mc: cls[i].mc, kind: cls[i].kind, letters: cls[i].letters }));
   }
   // The answer-sheet questions chosen (file numbers), as questions with groups.
   function srcParse(tex) {
@@ -729,6 +729,11 @@
     let types = qs.map((q) => {
       if (q.kind) return q.kind;
       if (q.choices >= 2) return LETTER_TYPES[Math.min(6, q.choices)];
+      // Choices listed once in the part's instructions ("(A) … (B) … (C)").
+      if (q.letters >= 2) {
+        const ans = Math.max(0, ...(q.key || []).map((k) => "ABCDEF".indexOf(k) + 1));
+        return LETTER_TYPES[Math.min(6, Math.max(q.letters, ans))];
+      }
       if (q.keyMacro && macroMax[q.keyMacro]) return LETTER_TYPES[Math.max(4, macroMax[q.keyMacro])];
       return null;
     });

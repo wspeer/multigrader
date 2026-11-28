@@ -104,8 +104,11 @@ takes your test (Version A) as `.docx`, `.tex` or `.pdf`:
   file suggests, with **Use the format from the file** to go back to it. A test
   that already has a key keeps its format when you upload; the file is matched
   to it instead.
-- Where a file doesn't write out the choices (a LaTeX macro with the answer
-  only), enough letters for the answers are used, at least A–D.
+- Where a file doesn't write out each question's choices (a LaTeX macro with
+  the answer only), the letters listed in that part's instructions are used
+  ("bubble (A) if…, (B) if…, or (C) if…" → A–C; "arrows labeled A–E" → A–E);
+  failing that, enough letters for the answers, at least A–D. Parts separated
+  by headings or instructions keep their own ranges.
 - **PDF:** the text is read with the bundled pdf.js (`vendor/pdfjs`), one
   column at a time on two-column pages, without page headers and footers.
   Larger pictures count as lines of their own, so a screenshot question with
