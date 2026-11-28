@@ -79,7 +79,7 @@
           text += it.str;
           end = it.x + it.w;
         }
-        out.push({ text: text.replace(/[ \u00a0]+/g, " "), pic: pic && !text.trim(), x: its[0].x, y: row.y, h: row.h });
+        out.push({ text: text.replace(/[ \u00a0]+/g, " "), pic: pic && !text.trim(), x: its[0].x, x2: end == null ? its[0].x : end, y: row.y, h: row.h });
       }
     }
     return out;
@@ -109,30 +109,48 @@
     return [left, right];
   }
 
-  /* Pictures drawn on a page, as boxes in page coordinates (top-left origin). */
-  async function pagePictures(lib, page, vp) {
+  /* Pictures drawn on a page, and highlight boxes (light green or yellow
+   * fills behind a line, as in a scoring guide or a highlighted key), as
+   * boxes in page coordinates (top-left origin). */
+  async function pageGraphics(lib, page, vp) {
     const ops = await page.getOperatorList();
     const OPS = lib.OPS;
     const mul = (m, n) => [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3], m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]];
-    let ctm = [1, 0, 0, 1, 0, 0];
+    let ctm = [1, 0, 0, 1, 0, 0], fill = null, path = null;
     const stack = [];
-    const pics = [];
+    const pics = [], marks = [];
+    const boxOf = (pts) => {
+      const vs = pts.map(([u, v]) => vp.convertToViewportPoint(ctm[0] * u + ctm[2] * v + ctm[4], ctm[1] * u + ctm[3] * v + ctm[5]));
+      const xs = vs.map((p) => p[0]), ys = vs.map((p) => p[1]);
+      return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+    };
+    const rgbOf = (args) => {
+      if (!args) return null;
+      if (typeof args[0] === "string" && /^#[0-9a-f]{6}$/i.test(args[0])) return [1, 3, 5].map((i) => parseInt(args[0].slice(i, i + 2), 16));
+      return [args[0], args[1], args[2]].map(Number);
+    };
+    const highlight = (c) => c && ((c[1] > 190 && c[1] - c[0] > 12 && c[1] - c[2] > 12) || (c[0] > 200 && c[1] > 200 && c[2] < 150));
     for (let i = 0; i < ops.fnArray.length; i++) {
       const fn = ops.fnArray[i], args = ops.argsArray[i];
-      if (fn === OPS.save) stack.push(ctm);
-      else if (fn === OPS.restore) ctm = stack.pop() || ctm;
+      if (fn === OPS.save) stack.push({ ctm, fill });
+      else if (fn === OPS.restore) { const st = stack.pop(); if (st) ({ ctm, fill } = st); }
       else if (fn === OPS.transform) ctm = mul(ctm, args);
-      else if (fn === OPS.paintFormXObjectBegin && args && args[0]) { stack.push(ctm); ctm = mul(ctm, args[0]); }
-      else if (fn === OPS.paintFormXObjectEnd) ctm = stack.pop() || ctm;
-      else if (fn === OPS.paintImageXObject || fn === OPS.paintInlineImageXObject || fn === OPS.paintJpegXObject) {
-        const pts = [[0, 0], [1, 0], [0, 1], [1, 1]].map(([u, v]) => vp.convertToViewportPoint(ctm[0] * u + ctm[2] * v + ctm[4], ctm[1] * u + ctm[3] * v + ctm[5]));
-        const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
-        const box = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+      else if (fn === OPS.paintFormXObjectBegin && args && args[0]) { stack.push({ ctm, fill }); ctm = mul(ctm, args[0]); }
+      else if (fn === OPS.paintFormXObjectEnd) { const st = stack.pop(); if (st) ({ ctm, fill } = st); }
+      else if (fn === OPS.setFillRGBColor) fill = rgbOf(args);
+      else if (fn === OPS.setFillGray) fill = [args[0] * 255, args[0] * 255, args[0] * 255];
+      else if (fn === OPS.constructPath) path = args && args[2];
+      else if ((fn === OPS.fill || fn === OPS.eoFill) && path && highlight(fill)) {
+        const [x0, x1, y0, y1] = path;
+        const box = boxOf([[x0, y0], [x1, y0], [x0, y1], [x1, y1]]);
+        if (box.w > 8 && box.h > 6 && box.h < 72) marks.push(box);
+      } else if (fn === OPS.paintImageXObject || fn === OPS.paintInlineImageXObject || fn === OPS.paintJpegXObject) {
+        const box = boxOf([[0, 0], [1, 0], [0, 1], [1, 1]]);
         // Big enough to be a figure or a screenshot (not an inline symbol).
         if (box.w > 72 && box.h > 54) pics.push(box);
       }
     }
-    return pics;
+    return { pics, marks };
   }
 
   /* ---------- the PDF → lines ---------- */
@@ -155,10 +173,16 @@
         items.push({ x, y: y - h * 0.8, w: it.width, h, str: it.str });
         chars += it.str.trim().length;
       }
-      let pics = [];
-      try { pics = await pagePictures(L, page, vp); } catch (e) { /* pictures are optional */ }
-      for (const b of pics) items.push({ x: b.x, y: b.y, w: b.w, h: 12, str: "", pic: true });
-      pages.push({ page, vp, items, lines: pageLines(items, vp.width), height: vp.height });
+      let g = { pics: [], marks: [] };
+      try { g = await pageGraphics(L, page, vp); } catch (e) { /* optional */ }
+      for (const b of g.pics) items.push({ x: b.x, y: b.y, w: b.w, h: 12, str: "", pic: true });
+      const lines = pageLines(items, vp.width);
+      // A line inside a highlight box is highlighted (a marked answer).
+      for (const l of lines) {
+        const mid = l.y + (l.h || 10) / 2;
+        if (l.text.trim() && g.marks.some((m) => mid >= m.y - 1 && mid <= m.y + m.h + 1 && l.x <= m.x + m.w && (l.x2 || l.x) >= m.x)) l.hl = true;
+      }
+      pages.push({ page, vp, items, lines, height: vp.height });
     }
     let ocr = false;
     // No text at all: a scanned test. Read it with OCR.
@@ -195,7 +219,7 @@
     const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const kids = lines.map((l) => {
       const xml = "<w:p>" + l.text.split("\t").map((part, i) => (i ? "<w:r><w:tab/></w:r>" : "") + (part ? `<w:r><w:t xml:space="preserve">${esc(part)}</w:t></w:r>` : "")).join("") + (l.pic ? "<w:r><w:drawing/></w:r>" : "") + "</w:p>";
-      return { kind: "p", xml, text: l.text, pic: !!l.pic, hasContent: !!l.text.trim() || !!l.pic, breakOnly: false, sect: false, leadBreak: false, trailBreak: false, pbBefore: false, leadN: 0, trailN: 0 };
+      return { kind: "p", xml, text: l.text, pic: !!l.pic, hl: !!l.hl, hasContent: !!l.text.trim() || !!l.pic, breakOnly: false, sect: false, leadBreak: false, trailBreak: false, pbBefore: false, leadN: 0, trailN: 0 };
     });
     return { kids, docXml: "", entries: [], extra: [], fmt: () => undefined, nums: {}, absStart: {}, restart: {} };
   }

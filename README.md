@@ -95,8 +95,11 @@ takes your test (Version A) as `.docx`, `.tex` or `.pdf`:
   `1–8, 16–22`), and you can change it.
 - For a new test (no key yet), it **sets up the question format**: one bubble
   type per question from its choices (a–d → A–D, True/False, Always/Sometimes/
-  Never), with questions of the same type grouped into a section. Choosing
-  other questions updates the format while it's still the file's.
+  Never), with questions of the same type grouped into a section. Lettered
+  questions in the same part share the widest range, so a few four-choice
+  questions among five-choice ones make one A–E section (a spare bubble does
+  no harm). Choosing other questions updates the format while it's still the
+  file's.
 - You can still change the format by hand. The upload card then shows what the
   file suggests, with **Use the format from the file** to go back to it. A test
   that already has a key keeps its format when you upload; the file is matched

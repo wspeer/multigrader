@@ -741,6 +741,13 @@
       }
       return types.find(Boolean) || "AE";
     });
+    // Lettered questions in the same part of the test share one range (the
+    // most letters any of them uses), so a part with a few four-choice
+    // questions among five-choice ones is one A–E section.
+    const LETTERS = ["AB", "AC", "AD", "AE", "AF"];
+    const widest = {};
+    qs.forEach((q, i) => { if (LETTERS.includes(types[i])) widest[q.block] = Math.max(widest[q.block] || 0, LETTERS.indexOf(types[i])); });
+    types = types.map((ty, i) => (LETTERS.includes(ty) ? LETTERS[widest[qs[i].block]] : ty));
     const out = [];
     for (const ty of types) {
       const last = out[out.length - 1];

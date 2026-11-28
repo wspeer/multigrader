@@ -47,7 +47,7 @@ const MIXED_TEX = String.raw`\documentclass{exam}
 
 // Runs in the page: a small test as a PDF (MultiGrader's PDF writer), or as a
 // scan of that PDF (page images only, no text).
-async function makeTestPdf(scan) {
+async function makeTestPdf(scan, keyed) {
   const lines = [
     ["Part 1: True or False", 1], ["1.  A square is a rectangle.", 0], ["2.  Every rhombus is a square.", 0],
     ["Part 2: Multiple choice", 1], ["3.  What is 2 + 2?", 0], ["a) 3", 2], ["b) 4", 2], ["c) 5", 2], ["d) 6", 2],
@@ -62,7 +62,11 @@ async function makeTestPdf(scan) {
   ops.push({ t: "text", x: 18, y: 14, size: 4.5, text: "Unit Quiz - Version A", bold: true });
   for (const [text, kind] of lines) {
     if (kind === 1) y += 4;
+    // An answer key: Q3's answer highlighted in green (as in a scoring guide),
+    // Q4's given on an "Answer B" line, Q8's highlighted in yellow.
+    if (keyed && (text === "b) 4" || text.startsWith("a) 1    b) 3"))) ops.push({ t: "rect", x: 16, y: y - 4.2, w: 150, h: 6, fill: text === "b) 4" ? "#e6ffe6" : "#ffff66" });
     ops.push({ t: "text", x: kind === 2 ? 26 : 18, y, size: 4.2, text, bold: kind === 1 });
+    if (keyed && text === "d) 15") { y += 7.5; ops.push({ t: "text", x: 22, y, size: 4.2, text: "Answer B", bold: true }); }
     y += kind === 0 && /^6\./.test(text) ? 30 : 7.5;
   }
   let blob = await MGPdf.sheetsToPDF([ops], { title: "quiz" });
@@ -188,6 +192,14 @@ async function makeTestPdf(scan) {
   await page.selectOption("#v-count", "2");
   await page.waitForSelector(".ver-block[data-v='B']");
   assert(!(await page.$("[data-texdl]")) && /can't make reordered copies of it/.test(await card()), "PDF: no reordered download; the card says to upload the Word or LaTeX file");
+
+
+  // ---- a PDF answer key: highlighted answers and "Answer B" lines fill the key ----
+  const keyB64 = await page.evaluate(() => window.__makeTestPdf(false, true));
+  await newTest();
+  await page.setInputFiles("#tex-in", { name: "key.pdf", mimeType: "application/pdf", buffer: Buffer.from(keyB64, "base64") });
+  await page.waitForFunction(() => /as found in the file/.test(document.querySelector("#upload-card").textContent), null, { timeout: 60000 });
+  assert((await page.evaluate(() => MGStore.flatKey(MGStore.db.tests[0]).join(","))) === ",,B,B,,,", "PDF key: Q3 from a green highlight, Q4 from \"Answer B\"; Q8's choices are on one line, so its highlight can't say which");
 
   // ---- a scanned PDF (no text) is read with OCR ----
   const scanB64 = await page.evaluate(() => window.__makeTestPdf(true));

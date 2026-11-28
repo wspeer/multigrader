@@ -419,6 +419,27 @@
       const a = near(i, -1), b = near(i, 1);
       if ((it.picNum || it.choices >= 2) && (!a || a.mc) && (!b || b.mc) && (a || b)) it.mc = true;
     });
+    // Answers marked in the file (an answer key or scoring guide): an
+    // "Answer: B" line, or highlighted answer choices (several = all required).
+    items.forEach((it) => {
+      const ks = K.slice(it.start, it.end);
+      let ans = null;
+      for (const k of ks) {
+        const m = k.text.match(/^\s*(?:correct\s+)?answers?\s*(?:is)?\s*[:\-]?\s*\(?([A-F]|True|False|T)\)?(?=$|[\s.,;])/i);
+        if (m && /^[A-FT]|^(?:true|false)$/i.test(m[1]) && (m[1].length > 1 || m[1] === m[1].toUpperCase())) { ans = m[1]; break; }
+      }
+      if (ans) { it.key = [/^true$/i.test(ans) ? "T" : /^false$/i.test(ans) ? "F" : ans.toUpperCase()]; it.keyAll = false; return; }
+      const hl = [];
+      for (const k of ks) {
+        if (!k.hl) continue;
+        // A highlighted line holding one answer choice (a line with several
+        // choices doesn't say which one is meant).
+        const m = k.text.match(/^\s*\(?([A-Fa-f])[).]/);
+        const labels = (k.text.match(/(?:^|\s)\(?[A-Fa-f][).]/g) || []).length;
+        if (m && labels === 1 && !hl.includes(m[1].toUpperCase())) hl.push(m[1].toUpperCase());
+      }
+      if (hl.length) { it.key = hl.sort(); it.keyAll = hl.length > 1; }
+    });
     // Once a question with no answer choices appears (written answer), later
     // ones count as multiple choice only after a multiple-choice heading.
     let free = false;
@@ -471,7 +492,7 @@
         const textBetween = prev.between.some((k) => k.sect || (k.kind === "tbl") || (k.kind === "other" && k.hasContent) || (k.kind === "p" && k.text.trim() && !k.breakOnly));
         if (idx !== prevIdx + 1 || textBetween) block++;
       }
-      questions.push({ ...it, block, correctIdx: [], key: null, keyAll: false });
+      questions.push({ ...it, block, correctIdx: [], key: it.key || null, keyAll: !!it.keyAll });
       prevIdx = idx;
     });
     return { mode, items, questions, error: null };
